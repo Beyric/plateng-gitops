@@ -1,0 +1,12 @@
+# Every change requires review by the platform owner.
+#
+# NOTE: CODEOWNERS is advisory until branch protection or a ruleset enforces it.
+# Enforcement is blocked on GitHub plan tier — see Finding ⑲.
+*                       @innocent98
+
+# Infrastructure and security controls — never merge these unreviewed.
+/modules/               @innocent98
+/projects/*/terraform/  @innocent98
+/.gitleaks.toml         @innocent98
+/.pre-commit-config.yaml @innocent98
+/scripts/               @innocent98
