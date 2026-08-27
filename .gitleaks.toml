@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "k8s-literal-secret-data"
+description = "A Kubernetes Secret carrying literal data — secrets must come from Vault via ESO"
+regex = '''(?sm)kind:\s*Secret.{0,400}?^\s*(data|stringData):'''
+path = '''\.ya?ml$'''
