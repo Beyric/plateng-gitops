@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        args: ["--redact"]
+
+  - repo: local
+    hooks:
+      - id: no-plaintext-secrets
+        name: Reject Kubernetes Secrets carrying literal key material
+        entry: scripts/no-plaintext-secrets.py
+        language: python
+        additional_dependencies: ["pyyaml"]
+        types: [yaml]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: detect-private-key

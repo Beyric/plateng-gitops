@@ -1,8 +1,31 @@
+# Entropy-based scanning only. The maintained default ruleset catches
+# secret-shaped strings — API keys, tokens, private keys, base64 blobs — anywhere
+# in the tree.
+#
+# There is deliberately NO bespoke rule for Kubernetes Secret manifests here.
+# One was tried and removed: `kind:\s*Secret.{0,400}?^\s*(data|stringData):`.
+# It failed in both directions, each confirmed by canary:
+#
+#   * FALSE NEGATIVE — the `{0,400}` proximity window is a stand-in for "the same
+#     YAML document". Eight ordinary annotations pushed `stringData` 897 characters
+#     past `kind`, and a genuine plaintext credential scanned completely clean.
+#
+#   * FALSE POSITIVE — matching `Secret` as a substring also matches `SecretStore`,
+#     so a legitimate namespaced ExternalSecret — the exact pattern this platform is
+#     built on — was rejected.
+#
+# Both defects were the same mistake: using a regular expression to answer a
+# structural question about nested data. That job belongs to a parser, and now
+# lives in scripts/no-plaintext-secrets.py, which is exact in both directions.
+#
+# A broken control is worse than an absent one, because it looks like a control.
+
 [extend]
 useDefault = true
 
-[[rules]]
-id = "k8s-literal-secret-data"
-description = "A Kubernetes Secret carrying literal data — secrets must come from Vault via ESO"
-regex = '''(?sm)kind:\s*Secret.{0,400}?^\s*(data|stringData):'''
-path = '''\.ya?ml$'''
+[allowlist]
+description = "Paths that legitimately contain secret-shaped strings"
+paths = [
+  '''\.gitleaks\.toml$''',
+  '''scripts/no-plaintext-secrets\.py$''',
+]

@@ -3,8 +3,19 @@
 .idea/
 .vscode/
 
-# Never commit rendered manifests or secrets
-*-secret.yaml
+# Decrypted output and cluster credentials — never committed
 *.dec.yaml
 kubeconfig
 *.kubeconfig
+
+# NOTE: this file deliberately does NOT ignore `*-secret.yaml`.
+#
+# ExternalSecret manifests are conventionally named `<app>-secret.yaml`, because
+# they produce a Secret of that name. Ignoring that pattern would silently drop
+# legitimate, secret-free manifests: `git add -A` would not stage them, `git status`
+# would not mention them, and Argo CD would never reconcile them — with no error
+# anywhere to explain why the app was missing its configuration.
+#
+# A filename tells you nothing about whether a manifest carries key material.
+# That question is answered by scripts/no-plaintext-secrets.py, which parses the
+# YAML and inspects the actual fields.
