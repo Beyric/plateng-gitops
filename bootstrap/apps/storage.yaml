@@ -1,0 +1,22 @@
+# Finding ⑳: the cluster ships with gp2 on the deprecated in-tree provisioner.
+# This routes storage to the CSI driver Phase 1 installed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: storage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: platform/storage
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

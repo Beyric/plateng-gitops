@@ -1,0 +1,22 @@
+# Finding ⑳ — routes storage to the CSI driver installed in Phase 1.
+#
+# gp3 over gp2: ~20% cheaper per GiB, and a guaranteed 3,000 IOPS baseline
+# regardless of volume size. gp2 scales IOPS with size, so a small volume is slow.
+#
+# WaitForFirstConsumer is not optional on EKS: EBS volumes are AZ-bound. Binding
+# immediately would place the volume before the scheduler picks a node, and a pod
+# landing in the other AZ could never attach it.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+parameters:
+  type: gp3
+  encrypted: "true"
+  fsType: ext4

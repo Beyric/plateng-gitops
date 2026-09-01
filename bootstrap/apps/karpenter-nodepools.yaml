@@ -1,0 +1,26 @@
+# Wave 2: the NodePool and EC2NodeClass custom resources.
+# These are separate from the chart because they depend on CRDs the chart
+# installs — applying them in the same wave is a race.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter-nodepools
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: platform/karpenter
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 15s, factor: 2, maxDuration: 3m }
