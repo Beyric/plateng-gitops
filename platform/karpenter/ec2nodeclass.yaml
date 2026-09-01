@@ -1,0 +1,35 @@
+# How Karpenter builds a node: which AMI, which subnets, which security groups,
+# which IAM role. Discovery is by tag, so Karpenter finds subnets Terraform
+# created without Terraform having to tell it about them.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  amiFamily: AL2023
+  amiSelectorTerms:
+    - alias: al2023@latest
+  role: Karpenter-weysure-prod-8a65130863f02987fc295b4e3e
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: weysure-prod
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: weysure-prod
+  # SonarQube's embedded Elasticsearch refuses to start without this (ADR-013).
+  # It is a host-level sysctl, not a pod setting, so it belongs here.
+  userData: |
+    #!/bin/bash
+    sysctl -w vm.max_map_count=262144
+    echo "vm.max_map_count=262144" >> /etc/sysctl.conf
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 50Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  tags:
+    Project: weysure
+    Environment: prod
+    ManagedBy: karpenter

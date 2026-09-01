@@ -1,0 +1,34 @@
+# Argo CD manages itself. After this syncs, changing Argo CD's own configuration
+# is a commit to this repo — not a helm upgrade run from someone's laptop.
+#
+# Two sources: the upstream chart, plus this repo referenced as `values` so the
+# chart can read a values file that lives here rather than being inlined.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.6.0
+      helm:
+        valueFiles:
+          - $values/platform/argocd/values.yaml
+    - repoURL: https://github.com/Beyric/plateng-gitops
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

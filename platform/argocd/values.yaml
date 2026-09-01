@@ -1,0 +1,49 @@
+# Argo CD's own configuration, managed by Argo CD.
+configs:
+  params:
+    # TLS is terminated by Traefik in Phase 4; running it here too would be
+    # double encryption for no benefit.
+    server.insecure: true
+  cm:
+    # Drift is surfaced as OutOfSync rather than silently corrected, so the
+    # first weeks show how often a human reaches past the system. Phase 5
+    # turns selfHeal on once that number is honest.
+    application.instanceLabelKey: argocd.argoproj.io/instance
+    timeout.reconciliation: 180s
+
+# Everything below sits on the on-demand system node group. Argo CD is the
+# deployment control plane; losing it to a spot reclaim mid-sync is avoidable.
+global:
+  nodeSelector:
+    node-role: system
+
+controller:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { memory: 1Gi }
+
+repoServer:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { memory: 512Mi }
+
+server:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 256Mi }
+
+applicationSet:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 256Mi }
+
+dex:
+  enabled: false # No SSO yet; local admin only until Phase 4 exposes it.
+
+notifications:
+  enabled: false
+
+redis:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { memory: 128Mi }
