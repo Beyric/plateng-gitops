@@ -1,0 +1,24 @@
+# Reloader — restarts workloads when a Secret or ConfigMap they consume changes.
+#
+# This is the missing link most people don't realise they need. When ESO
+# refreshes a Kubernetes Secret, running pods keep the OLD value indefinitely:
+# environment variables are read once at process start, and Kubernetes does not
+# restart a pod because a Secret changed. Without Reloader, rotating a credential
+# in Vault appears to work and changes nothing until the next unrelated deploy.
+#
+# Opt-in by annotation, not cluster-wide, so a restart is always something a
+# workload asked for.
+
+reloader:
+  watchGlobally: true
+  reloadStrategy: annotations
+  ignoreSecrets: false
+  ignoreConfigMaps: false
+
+  deployment:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 128Mi

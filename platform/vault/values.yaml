@@ -1,0 +1,87 @@
+# HashiCorp Vault — single replica, Raft storage, AWS KMS auto-unseal.
+#
+# Auto-unseal is the load-bearing decision here (ADR-007). Vault boots SEALED:
+# its storage master key is encrypted and Vault cannot read its own data until
+# unsealed. Without awskms, every restart needs a human entering 3-of-5 Shamir
+# key shares — so every pod eviction, node replacement or spot reclaim becomes
+# a manual outage. With it, Vault asks KMS to decrypt the key and unseals itself.
+
+global:
+  enabled: true
+
+# The Agent Injector mounts secrets as files via sidecars. We use External
+# Secrets Operator instead (ADR-008), which produces native Kubernetes Secrets
+# and keeps application manifests portable across secret backends.
+injector:
+  enabled: false
+
+server:
+  # Pinned so an Argo CD sync cannot silently move Vault's version.
+  image:
+    repository: hashicorp/vault
+    tag: "1.20.4"
+
+  serviceAccount:
+    create: true
+    # Must match the aws_eks_pod_identity_association in Terraform exactly.
+    # A mismatch means Vault starts, fails to reach KMS, and stays sealed.
+    name: vault
+
+  # Vault holds the cluster's secrets; it does not belong on a node that can
+  # vanish with two minutes' notice (ADR-003).
+  nodeSelector:
+    node-role: system
+
+  dataStorage:
+    enabled: true
+    size: 8Gi
+    storageClass: gp3
+
+  # Raft needs a stable identity and its own volume, so audit logs get their own.
+  auditStorage:
+    enabled: true
+    size: 4Gi
+    storageClass: gp3
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # readiness must accept a sealed Vault, or the pod never becomes Ready and
+  # you can never exec in to initialise it — a genuine chicken-and-egg.
+  readinessProbe:
+    enabled: true
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+
+  ha:
+    enabled: true
+    replicas: 1 # ADR-007: 3-replica Raft HA when node capacity allows
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+
+        listener "tcp" {
+          address     = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 1   # Phase 4 terminates TLS at Traefik; in-cluster is mTLS later
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+        }
+
+        seal "awskms" {
+          region     = "us-east-1"
+          kms_key_id = "05f4bdf7-0a2d-4432-827f-2509e4845e29"
+        }
+
+        service_registration "kubernetes" {}
+
+ui:
+  enabled: true
+  serviceType: ClusterIP
