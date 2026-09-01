@@ -1,0 +1,33 @@
+# External Secrets Operator — reads from Vault, writes native Kubernetes Secrets.
+#
+# Chosen over Vault Secrets Operator (ADR-008) because ExternalSecret manifests
+# describe WHAT secret is wanted, not WHERE it lives. Swapping Vault for AWS
+# Secrets Manager later changes one SecretStore resource; every application
+# manifest is untouched.
+
+installCRDs: true
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+webhook:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+certController:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
