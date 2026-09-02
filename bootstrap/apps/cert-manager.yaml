@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "4" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.21.1
+    helm:
+      valuesObject:
+        crds: { enabled: true }
+        # Cloudflare's public resolvers, not the cluster's. CoreDNS may answer
+        # from a split-horizon view and report the TXT record as missing, which
+        # stalls the ACME challenge until it times out.
+        dns01RecursiveNameservers: "1.1.1.1:53,1.0.0.1:53"
+        dns01RecursiveNameserversOnly: true
+        resources:
+          requests: { cpu: 20m, memory: 64Mi }
+  destination: { server: https://kubernetes.default.svc, namespace: cert-manager }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

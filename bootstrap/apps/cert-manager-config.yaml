@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager-config
+  namespace: argocd
+  # Wave 5: ClusterIssuers need cert-manager's CRDs, which arrive in wave 4.
+  annotations: { argocd.argoproj.io/sync-wave: "5" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: platform/cert-manager
+  destination: { server: https://kubernetes.default.svc }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
