@@ -9,13 +9,13 @@ spec:
   amiFamily: AL2023
   amiSelectorTerms:
     - alias: al2023@latest
-  role: Karpenter-weysure-prod-8a65130863f02987fc295b4e3e
+  role: Karpenter-beyric-prod-2f52eb359be83e56b3e7d22618
   subnetSelectorTerms:
     - tags:
-        karpenter.sh/discovery: weysure-prod
+        karpenter.sh/discovery: beyric-prod
   securityGroupSelectorTerms:
     - tags:
-        karpenter.sh/discovery: weysure-prod
+        karpenter.sh/discovery: beyric-prod
   # SonarQube's embedded Elasticsearch refuses to start without this (ADR-013).
   # It is a host-level sysctl, not a pod setting, so it belongs here.
   userData: |

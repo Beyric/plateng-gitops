@@ -17,8 +17,8 @@ spec:
     helm:
       values: |
         settings:
-          clusterName: weysure-prod
-          interruptionQueue: Karpenter-weysure-prod
+          clusterName: beyric-prod
+          interruptionQueue: Karpenter-beyric-prod
         # Authentication is an EKS Pod Identity association created by Terraform,
         # so no IRSA annotation and no static credentials are needed here.
         serviceAccount:
