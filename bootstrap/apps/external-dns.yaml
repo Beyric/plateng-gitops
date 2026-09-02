@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "4" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/external-dns
+    chart: external-dns
+    targetRevision: 1.21.1
+    helm:
+      valuesObject:
+        provider: { name: cloudflare }
+        env:
+          - name: CF_API_TOKEN
+            valueFrom:
+              secretKeyRef: { name: cloudflare-api-token, key: api-token }
+        extraArgs:
+          # Proxy through Cloudflare: TLS terminates at the Lagos PoP, and the
+          # NLB hostname is never exposed publicly (ADR-011).
+          - --cloudflare-proxied
+          # Only manage records for hosts we own.
+          - --domain-filter=beyrictech.com
+        # TXT ownership records stop external-dns deleting records it did not
+        # create - including any you add by hand in the Cloudflare dashboard.
+        policy: sync
+        txtOwnerId: beyric-prod
+        sources: [ingress, service]
+        resources:
+          requests: { cpu: 10m, memory: 64Mi }
+  destination: { server: https://kubernetes.default.svc, namespace: external-dns }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true]

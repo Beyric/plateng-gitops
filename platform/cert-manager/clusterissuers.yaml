@@ -1,0 +1,40 @@
+# TWO issuers, deliberately.
+#
+# Let's Encrypt production enforces hard rate limits - 5 duplicate certificates
+# per week, and a failed order still counts. A misconfiguration discovered
+# against production can lock you out of issuing for that name for days.
+# Staging has effectively no limits and issues from an untrusted root, so a
+# browser will warn but the DNS-01 flow is proven identical.
+#
+# Always prove the flow on staging, then switch the Ingress annotation.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: adebayo@beyrictech.com
+    privateKeySecretRef: { name: letsencrypt-staging-account-key }
+    solvers:
+      # DNS-01, not HTTP-01. HTTP-01 needs the ACME server to reach port 80 on
+      # the origin, which is impossible here: the NLB only admits Cloudflare IPs.
+      # DNS-01 proves control by writing a TXT record instead, and is the only
+      # option that also works for wildcard certificates.
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef: { name: cloudflare-api-token, key: api-token }
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: adebayo@beyrictech.com
+    privateKeySecretRef: { name: letsencrypt-prod-account-key }
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef: { name: cloudflare-api-token, key: api-token }
