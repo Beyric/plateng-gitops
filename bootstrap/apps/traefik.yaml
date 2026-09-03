@@ -21,26 +21,28 @@ spec:
             service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
             service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
             service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
-        ports:
-          web:
-            # Everything arrives over HTTPS through Cloudflare; plain HTTP is
-            # only ever a redirect.
-            redirectTo: { port: websecure, priority: 10 }
-          websecure:
-            tls: { enabled: true }
-        # Cloudflare proxies every request, so without this Traefik sees
-        # Cloudflare's IP as the client and rate limiting would treat the whole
-        # internet as one caller (ADR-011).
+        # Chart 41 removed the ports.web.redirectTo, ports.websecure.tls and
+        # top-level logs values. Everything below is expressed as Traefik's own
+        # CLI flags instead, which have been stable for years and are not
+        # subject to the chart's values schema changing under us again.
         additionalArguments:
+          # Plain HTTP is only ever a redirect - everything arrives over HTTPS
+          # through Cloudflare.
+          - "--entryPoints.web.http.redirections.entryPoint.to=websecure"
+          - "--entryPoints.web.http.redirections.entryPoint.scheme=https"
+          - "--entryPoints.web.http.redirections.entryPoint.permanent=true"
+          - "--entryPoints.websecure.http.tls=true"
+          # Cloudflare proxies every request, so without this Traefik sees
+          # Cloudflare's IP as the client and rate limiting would treat the
+          # whole internet as one caller (ADR-011).
           - "--entryPoints.websecure.forwardedHeaders.trustedIPs=173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22"
+          - "--log.level=INFO"
+          - "--accesslog=true"
         providers:
           kubernetesCRD: { enabled: true, allowCrossNamespace: false }
           kubernetesIngress: { enabled: true, publishedService: { enabled: true } }
         # Ingress objects with no ingressClassName still route here.
         ingressClass: { enabled: true, isDefaultClass: true }
-        logs:
-          general: { level: INFO }
-          access: { enabled: true }
         resources:
           requests: { cpu: 50m, memory: 96Mi }
   destination: { server: https://kubernetes.default.svc, namespace: traefik }
