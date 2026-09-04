@@ -1,0 +1,124 @@
+# One-shot bootstrap. Runs once, then this Job is a record of what was done.
+#
+# Three steps, three containers, one shared memory-backed volume. The RDS master
+# password is fetched via pod identity, used to create the `vault` role and the
+# application database, and never written to disk or to a Kubernetes Secret.
+# Vault then rotates the `vault` role's password to one only Vault knows.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-bootstrap
+  namespace: weysure-prod
+  annotations:
+    # Sync hook: runs during the Argo CD sync and is deleted afterwards on
+    # success, so a later sync does not try to re-run it.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: db-bootstrap
+      restartPolicy: Never
+      volumes:
+        - name: scratch
+          emptyDir: { medium: Memory }   # RAM only - nothing survives the pod
+      initContainers:
+        # ── 1. master password → memory volume ──────────────────────────────
+        - name: fetch-master-secret
+          image: public.ecr.aws/aws-cli/aws-cli:2.22.35
+          env:
+            - { name: AWS_REGION, value: us-east-1 }
+            - { name: SECRET_ARN, value: "arn:aws:secretsmanager:us-east-1:767397877316:secret:rds!db-c396f13d-c4f7-4672-8d0f-4b9929190102-SIlkgw" }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" \
+                --query SecretString --output text > /scratch/master.json
+              echo "master secret fetched ($(wc -c < /scratch/master.json) bytes)"
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]
+
+        # ── 2. create role + database as master, over TLS ───────────────────
+        - name: create-role-and-db
+          image: postgres:16-alpine
+          env:
+            - { name: PGHOST, value: weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com }
+            - { name: PGPORT, value: "5432" }
+            - { name: PGDATABASE, value: postgres }
+            - { name: PGSSLMODE, value: require }   # rds.force_ssl=1 refuses anything less
+          command: ["sh", "-ec"]
+          args:
+            - |
+              apk add --no-cache jq openssl >/dev/null
+              export PGUSER=$(jq -r .username /scratch/master.json)
+              export PGPASSWORD=$(jq -r .password /scratch/master.json)
+              VAULT_PW=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
+              printf '%s' "$VAULT_PW" > /scratch/vault-role.pw
+
+              # Idempotent: safe to re-run if step 3 fails and the Job retries.
+              psql -v ON_ERROR_STOP=1 -v pw="$VAULT_PW" <<'SQL'
+              DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault') THEN
+                  CREATE ROLE vault WITH LOGIN CREATEROLE;
+                END IF;
+              END $$;
+              ALTER ROLE vault WITH PASSWORD :'pw';
+              SELECT 'CREATE DATABASE weysure OWNER vault'
+                WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'weysure') \gexec
+              GRANT ALL PRIVILEGES ON DATABASE weysure TO vault;
+              SQL
+              echo "role vault + database weysure ready"
+              rm -f /scratch/master.json    # master password no longer needed
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]
+
+      containers:
+        # ── 3. hand the role to Vault, then make Vault the only one who knows it ─
+        - name: configure-vault-db-engine
+          image: hashicorp/vault:1.20.4
+          env:
+            - { name: VAULT_ADDR, value: http://vault.vault.svc:8200 }
+            - { name: PGHOST, value: weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              JWT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login \
+                role=db-bootstrap jwt="$JWT")
+
+              vault secrets enable -path=database database 2>/dev/null || echo "database engine already enabled"
+
+              vault write database/config/weysure \
+                plugin_name=postgresql-database-plugin \
+                allowed_roles="weysure-app,weysure-migrate" \
+                connection_url="postgresql://{{username}}:{{password}}@${PGHOST}:5432/weysure?sslmode=require" \
+                username="vault" \
+                password="$(cat /scratch/vault-role.pw)"
+              rm -f /scratch/vault-role.pw
+
+              # From here, only Vault knows the vault role's password.
+              vault write -f database/rotate-root/weysure
+
+              # Application: rows only. Cannot alter schema.
+              vault write database/roles/weysure-app \
+                db_name=weysure default_ttl=1h max_ttl=4h \
+                creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; \
+                  GRANT CONNECT ON DATABASE weysure TO \"{{name}}\"; \
+                  GRANT USAGE ON SCHEMA public TO \"{{name}}\"; \
+                  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; \
+                  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\"; \
+                  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO \"{{name}}\";" \
+                revocation_statements="REASSIGN OWNED BY \"{{name}}\" TO vault; DROP OWNED BY \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";"
+
+              # Migrations: full DDL, short-lived. Used only by the Alembic PreSync hook.
+              vault write database/roles/weysure-migrate \
+                db_name=weysure default_ttl=30m max_ttl=1h \
+                creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}' IN ROLE vault; \
+                  GRANT ALL PRIVILEGES ON DATABASE weysure TO \"{{name}}\"; \
+                  GRANT ALL ON SCHEMA public TO \"{{name}}\";" \
+                revocation_statements="REASSIGN OWNED BY \"{{name}}\" TO vault; DROP OWNED BY \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";"
+
+              echo "--- proof: mint a 1h credential and read it back (username only) ---"
+              vault read -field=username database/creds/weysure-app
+              echo "bootstrap complete"
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]

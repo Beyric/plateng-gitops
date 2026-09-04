@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: weysure-prod
+  labels:
+    project: weysure
+    environment: prod
+---
+# The pod identity association in Terraform (rds.tf) targets exactly this
+# namespace + ServiceAccount pair. Rename either and the Job loses AWS access
+# with an unhelpful "no credentials" error, not a Kubernetes one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-bootstrap
+  namespace: weysure-prod
