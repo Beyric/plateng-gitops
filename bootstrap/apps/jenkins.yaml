@@ -1,0 +1,101 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jenkins
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "7" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jenkins.io
+    chart: jenkins
+    targetRevision: 5.9.56
+    helm:
+      valuesObject:
+        controller:
+          jenkinsUrl: https://jenkins.beyrictech.com
+          # Controller is stateful and must not be reclaimed: on-demand system node.
+          nodeSelector: { node-role: system }
+          resources:
+            requests: { cpu: 500m, memory: 1536Mi }
+            limits: { memory: 2560Mi }
+          admin:
+            existingSecret: jenkins-admin
+            userKey: jenkins-admin-user
+            passwordKey: jenkins-admin-password
+          # Mounted at /run/secrets/additional/<name>-<key>; JCasC reads them as
+          # ${name-key}. Values never appear in this file or in Jenkins' UI.
+          additionalExistingSecrets:
+            - { name: jenkins-github-app, keyName: app_id }
+            - { name: jenkins-github-app, keyName: private_key }
+            - { name: jenkins-webhook, keyName: secret }
+          installPlugins:
+            - kubernetes
+            - workflow-aggregator
+            - git
+            - configuration-as-code
+            - github-branch-source
+            - credentials-binding
+            - pipeline-utility-steps
+            - sonar
+          # No plugin auto-updates: a chart pin that installs "latest" plugins on
+          # every restart is not a pin.
+          overwritePlugins: true
+          installLatestPlugins: false
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hostName: jenkins.beyrictech.com
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+            tls:
+              - secretName: jenkins-tls
+                hosts: [jenkins.beyrictech.com]
+          JCasC:
+            defaultConfig: true
+            configScripts:
+              credentials: |
+                credentials:
+                  system:
+                    domainCredentials:
+                      - credentials:
+                          - gitHubApp:
+                              id: github-app
+                              description: "beyric-ci GitHub App - clones app repos, commits image tags to plateng-gitops"
+                              appID: "${jenkins-github-app-app_id}"
+                              privateKey: "${jenkins-github-app-private_key}"
+                          - string:
+                              id: github-webhook-secret
+                              description: "Shared secret GitHub signs webhook payloads with"
+                              secret: "${jenkins-webhook-secret}"
+              github: |
+                unclassified:
+                  gitHubPluginConfig:
+                    hookSecretConfigs:
+                      - credentialsId: github-webhook-secret
+              security: |
+                jenkins:
+                  numExecutors: 0   # the controller never runs builds; agents do
+                  systemMessage: "beyric-ci - configuration is code in plateng-gitops. Changes made in this UI are overwritten."
+        persistence:
+          storageClass: gp3
+          size: 8Gi
+        # The agent ServiceAccount the Terraform pod identity association targets.
+        serviceAccountAgent:
+          create: true
+          name: jenkins-agent
+        agent:
+          # Agents are ephemeral: Karpenter spot, scale to zero between builds.
+          nodeSelector: { node-role: workload }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { memory: 3Gi }
+          podRetention: OnFailure
+          idleMinutes: 2
+        rbac:
+          create: true
+  destination: { server: https://kubernetes.default.svc, namespace: jenkins }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

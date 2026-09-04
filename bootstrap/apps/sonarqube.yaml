@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sonarqube
+  namespace: argocd
+  # Wave 8: after its Postgres (7). SonarQube crash-loops if the DB is absent.
+  annotations: { argocd.argoproj.io/sync-wave: "8" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://SonarSource.github.io/helm-chart-sonarqube
+    chart: sonarqube
+    targetRevision: 2026.4.1
+    helm:
+      valuesObject:
+        community: { enabled: true }
+        # Karpenter nodes boot with vm.max_map_count=262144 (EC2NodeClass
+        # userData, ADR-013), so the chart's privileged sysctl init container is
+        # unnecessary - and Kyverno will forbid privileged in Phase 8.
+        initSysctl: { enabled: false }
+        nodeSelector: { node-role: workload }
+        postgresql: { enabled: false }
+        jdbcOverwrite:
+          enable: true
+          jdbcUrl: jdbc:postgresql://sonar-postgres.sonarqube.svc:5432/sonarqube
+          jdbcUsername: sonarqube
+          jdbcSecretName: sonar-postgres
+          jdbcSecretPasswordKey: password
+        monitoringPasscodeSecretName: sonar-postgres
+        monitoringPasscodeSecretKey: monitoring-passcode
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          hosts: [{ name: sonar.beyrictech.com }]
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+          tls: [{ secretName: sonar-tls, hosts: [sonar.beyrictech.com] }]
+        persistence: { enabled: true, storageClass: gp3, size: 10Gi }
+        resources:
+          requests: { cpu: 500m, memory: 2Gi }
+          limits: { memory: 4Gi }
+  destination: { server: https://kubernetes.default.svc, namespace: sonarqube }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
