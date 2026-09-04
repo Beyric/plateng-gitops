@@ -13,7 +13,9 @@ metadata:
     # Sync hook: runs during the Argo CD sync and is deleted afterwards on
     # success, so a later sync does not try to re-run it.
     argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # BeforeHookCreation: a failed run from a previous sync is deleted before
+    # the next attempt, so a fix can simply be merged and re-synced.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
   backoffLimit: 2
   ttlSecondsAfterFinished: 3600
@@ -57,12 +59,17 @@ spec:
               printf '%s' "$VAULT_PW" > /scratch/vault-role.pw
 
               # Idempotent: safe to re-run if step 3 fails and the Job retries.
+              #
+              # $body$ rather than $$: Kubernetes expands $(VAR) in command/args
+              # and treats $$ as the escape for a literal $, so $$ reaches psql
+              # as a single $ and the DO block fails to parse. A named tag
+              # contains no $$ sequence and passes through untouched.
               psql -v ON_ERROR_STOP=1 -v pw="$VAULT_PW" <<'SQL'
-              DO $$ BEGIN
+              DO $body$ BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'vault') THEN
                   CREATE ROLE vault WITH LOGIN CREATEROLE;
                 END IF;
-              END $$;
+              END $body$;
               ALTER ROLE vault WITH PASSWORD :'pw';
               SELECT 'CREATE DATABASE weysure OWNER vault'
                 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'weysure') \gexec
