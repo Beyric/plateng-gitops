@@ -1,0 +1,46 @@
+# SonarQube's database. Not on RDS: db.t4g.micro has 1 GiB and cannot host both
+# the application and SonarQube, and this data is analysis history - losing it
+# costs re-analysis, not money (ADR-013).
+apiVersion: v1
+kind: Service
+metadata: { name: sonar-postgres, namespace: sonarqube }
+spec:
+  clusterIP: None
+  selector: { app: sonar-postgres }
+  ports: [{ name: postgres, port: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: sonar-postgres, namespace: sonarqube }
+spec:
+  serviceName: sonar-postgres
+  replicas: 1
+  selector: { matchLabels: { app: sonar-postgres } }
+  template:
+    metadata: { labels: { app: sonar-postgres } }
+    spec:
+      nodeSelector: { node-role: workload }
+      securityContext: { runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70 }
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_DB, value: sonarqube }
+            - { name: POSTGRES_USER, value: sonarqube }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: sonar-postgres, key: db_password } }
+          ports: [{ name: postgres, containerPort: 5432 }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, sonarqube] }
+            periodSeconds: 5
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: gp3
+        resources: { requests: { storage: 5Gi } }

@@ -1,0 +1,10 @@
+# Created here, in wave 6, rather than by the charts: the ExternalSecrets below
+# must exist BEFORE the charts install, because both charts read their admin
+# and database passwords from Kubernetes Secrets at install time.
+apiVersion: v1
+kind: Namespace
+metadata: { name: jenkins, labels: { platform: ci } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: sonarqube, labels: { platform: ci } }
