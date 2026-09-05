@@ -15,6 +15,10 @@ spec:
       valuesObject:
         controller:
           jenkinsUrl: https://jenkins.beyrictech.com
+          # The controller never runs builds; agents do. Set here, not in a JCasC
+          # script - the chart's defaultConfig already emits jenkins.numExecutors,
+          # and a second jenkins: block is a merge conflict that stops startup.
+          numExecutors: 0
           # Controller is stateful and must not be reclaimed: on-demand system node.
           nodeSelector: { node-role: system }
           resources:
@@ -39,10 +43,13 @@ spec:
             - credentials-binding
             - pipeline-utility-steps
             - sonar
-          # No plugin auto-updates: a chart pin that installs "latest" plugins on
-          # every restart is not a pin.
+          # installLatestPlugins resolves the transitive dependency graph against
+          # the running core. With it off and unversioned names, token-macro
+          # failed to load and took github, github-branch-source and the whole
+          # pipeline stack down with it. The real pin is explicit name:version
+          # for every plugin AND dependency - a follow-up, not a mid-phase change.
           overwritePlugins: true
-          installLatestPlugins: false
+          installLatestPlugins: true
           ingress:
             enabled: true
             ingressClassName: traefik
@@ -74,10 +81,6 @@ spec:
                   gitHubPluginConfig:
                     hookSecretConfigs:
                       - credentialsId: github-webhook-secret
-              security: |
-                jenkins:
-                  numExecutors: 0   # the controller never runs builds; agents do
-                  systemMessage: "beyric-ci - configuration is code in plateng-gitops. Changes made in this UI are overwritten."
         persistence:
           storageClass: gp3
           size: 8Gi
