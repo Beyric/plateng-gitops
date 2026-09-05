@@ -28,6 +28,9 @@ spec:
     metadata:
       labels: { app: redis }
     spec:
+      # Application tier: Karpenter, not the system node. Without this the
+      # scheduler placed it wherever there was room, which was the system node.
+      nodeSelector: { node-role: workload }
       securityContext: { runAsNonRoot: true, runAsUser: 999, fsGroup: 999 }
       containers:
         - name: redis
