@@ -21,15 +21,15 @@ spec:
             requests: { cpu: 500m, memory: 1536Mi }
             limits: { memory: 2560Mi }
           admin:
-            existingSecret: jenkins-admin
-            userKey: jenkins-admin-user
-            passwordKey: jenkins-admin-password
+            existingSecret: jenkins-platform
+            userKey: admin_user
+            passwordKey: admin_password
           # Mounted at /run/secrets/additional/<name>-<key>; JCasC reads them as
           # ${name-key}. Values never appear in this file or in Jenkins' UI.
           additionalExistingSecrets:
             - { name: jenkins-github-app, keyName: app_id }
             - { name: jenkins-github-app, keyName: private_key }
-            - { name: jenkins-webhook, keyName: secret }
+            - { name: jenkins-platform, keyName: webhook_secret }
           installPlugins:
             - kubernetes
             - workflow-aggregator
@@ -68,7 +68,7 @@ spec:
                           - string:
                               id: github-webhook-secret
                               description: "Shared secret GitHub signs webhook payloads with"
-                              secret: "${jenkins-webhook-secret}"
+                              secret: "${jenkins-platform-webhook_secret}"
               github: |
                 unclassified:
                   gitHubPluginConfig:

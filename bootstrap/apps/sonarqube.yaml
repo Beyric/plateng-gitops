@@ -26,9 +26,9 @@ spec:
           jdbcUrl: jdbc:postgresql://sonar-postgres.sonarqube.svc:5432/sonarqube
           jdbcUsername: sonarqube
           jdbcSecretName: sonar-postgres
-          jdbcSecretPasswordKey: password
+          jdbcSecretPasswordKey: db_password
         monitoringPasscodeSecretName: sonar-postgres
-        monitoringPasscodeSecretKey: monitoring-passcode
+        monitoringPasscodeSecretKey: monitoring_passcode
         ingress:
           enabled: true
           ingressClassName: traefik
