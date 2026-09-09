@@ -78,6 +78,10 @@ spec:
                               id: github-webhook-secret
                               description: "Shared secret GitHub signs webhook payloads with"
                               secret: "${jenkins-platform-webhook_secret}"
+                          - string:
+                              id: sonar-token
+                              description: "SonarQube global analysis token"
+                              secret: "${jenkins-platform-sonar_token}"
               github: |
                 unclassified:
                   gitHubPluginConfig:
