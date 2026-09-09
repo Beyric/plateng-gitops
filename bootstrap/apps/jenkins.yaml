@@ -45,6 +45,7 @@ spec:
             - pipeline-utility-steps
             - sonar
             - job-dsl
+            - junit   # test report publishing; the pipelines' post { junit } step
           # installLatestPlugins resolves the transitive dependency graph against
           # the running core. With it off and unversioned names, token-macro
           # failed to load and took github, github-branch-source and the whole
