@@ -34,6 +34,7 @@ spec:
             - { name: jenkins-github-app, keyName: app_id }
             - { name: jenkins-github-app, keyName: private_key }
             - { name: jenkins-platform, keyName: webhook_secret }
+            - { name: jenkins-platform, keyName: sonar_token }
           installPlugins:
             - kubernetes
             - workflow-aggregator
@@ -43,6 +44,7 @@ spec:
             - credentials-binding
             - pipeline-utility-steps
             - sonar
+            - job-dsl
           # installLatestPlugins resolves the transitive dependency graph against
           # the running core. With it off and unversioned names, token-macro
           # failed to load and took github, github-branch-source and the whole
@@ -81,6 +83,42 @@ spec:
                   gitHubPluginConfig:
                     hookSecretConfigs:
                       - credentialsId: github-webhook-secret
+                  # In-cluster URL: analysis traffic never leaves the cluster or
+                  # touches Cloudflare. The public hostname is for humans.
+                  sonarGlobalConfiguration:
+                    buildWrapperEnabled: false
+                    installations:
+                      - name: sonarqube
+                        serverUrl: http://sonarqube-sonarqube.sonarqube.svc:9000
+                        credentialsId: sonar-token
+              jobs: |
+                jobs:
+                  - script: >
+                      organizationFolder('beyric') {
+                        displayName('Beyric')
+                        description('Every Beyric repository with a Jenkinsfile. Configured by JCasC in plateng-gitops; changes made here are overwritten.')
+                        organizations {
+                          github {
+                            repoOwner('Beyric')
+                            apiUri('https://api.github.com')
+                            credentialsId('github-app')
+                            traits {
+                              gitHubBranchDiscovery { strategyId(1) }
+                              gitHubPullRequestDiscovery { strategyId(1) }
+                              sourceRegexFilter { regex('Weysure-API|Weysure') }
+                            }
+                          }
+                        }
+                        projectFactories {
+                          workflowMultiBranchProjectFactory { scriptPath('Jenkinsfile') }
+                        }
+                        orphanedItemStrategy {
+                          discardOldItems { daysToKeep(7); numToKeep(10) }
+                        }
+                        triggers {
+                          periodicFolderTrigger { interval('1d') }
+                        }
+                      }
         persistence:
           storageClass: gp3
           size: 8Gi

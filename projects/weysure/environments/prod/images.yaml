@@ -1,0 +1,10 @@
+# The CI -> CD handoff (ADR-005). Jenkins' final stage writes the git SHA it
+# just built and pushed here, and nothing else. Phase 7's Helm charts read
+# these values; Argo CD reconciles the change. Rollback is git revert.
+#
+# Tags are git SHAs, never :latest (Finding 11). ECR is IMMUTABLE, so a tag
+# here names exactly one image forever.
+api:
+  tag: bootstrap   # replaced by the first successful weysure-api build
+web:
+  tag: bootstrap   # replaced by the first successful weysure-web build
