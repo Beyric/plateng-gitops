@@ -7,4 +7,4 @@
 api:
   tag: cec2051af518
 web:
-  tag: bootstrap   # replaced by the first successful weysure-web build
+  tag: c95c7c61d065
