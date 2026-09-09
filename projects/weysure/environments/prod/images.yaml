@@ -5,6 +5,6 @@
 # Tags are git SHAs, never :latest (Finding 11). ECR is IMMUTABLE, so a tag
 # here names exactly one image forever.
 api:
-  tag: bootstrap   # replaced by the first successful weysure-api build
+  tag: cec2051af518
 web:
   tag: bootstrap   # replaced by the first successful weysure-web build
