@@ -56,7 +56,7 @@ spec:
           {{- with $c.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
-          securityContext: {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          securityContext: {{- include "beyric-app.containerSecurityContext" $ | nindent 12 }}
           {{- if $c.port }}
           ports:
             - { name: http, containerPort: {{ $c.port }}, protocol: TCP }

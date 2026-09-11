@@ -46,3 +46,12 @@ vault.hashicorp.com/agent-inject-command-{{ $v.fileName }}: {{ $v.restartCommand
 {{- define "beyric-app.enabled" -}}
 {{- if hasKey . "enabled" }}{{ .enabled }}{{ else }}true{{ end -}}
 {{- end -}}
+
+{{/* Container securityContext = containerSecurityContext + runAsUser/runAsGroup from the pod
+     context. The Vault injector's agent-run-as-same-user reads the *container* runAsUser. */}}
+{{- define "beyric-app.containerSecurityContext" -}}
+{{- $ctx := deepCopy .Values.containerSecurityContext -}}
+{{- $_ := set $ctx "runAsUser" .Values.podSecurityContext.runAsUser -}}
+{{- $_ := set $ctx "runAsGroup" .Values.podSecurityContext.runAsGroup -}}
+{{- toYaml $ctx -}}
+{{- end -}}
