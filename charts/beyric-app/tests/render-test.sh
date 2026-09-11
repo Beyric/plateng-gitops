@@ -36,6 +36,7 @@ check(not [d for d in api if d['kind']=='Service' and d['metadata']['name']=='ap
 job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadata']['annotations']
 check(job['metadata']['annotations']['argocd.argoproj.io/hook']=='PreSync' and 'HookSucceeded' in job['metadata']['annotations']['argocd.argoproj.io/hook-delete-policy'], 'migration job is a PreSync hook')
 check(ja.get('vault.hashicorp.com/agent-pre-populate-only')=='true' and ja.get('vault.hashicorp.com/role')=='weysure-migrate', 'migration uses init-only agent with migrate role')
+sa=one(api,'ServiceAccount','db-migrate')['metadata']['annotations']; check(sa.get('argocd.argoproj.io/hook')=='PreSync' and sa.get('argocd.argoproj.io/sync-wave')=='-1', 'migration SA is a PreSync hook before the Job')
 check(job['spec']['backoffLimit']==0 and job['spec']['template']['spec']['serviceAccountName']=='db-migrate', 'migration job SA + no retries')
 es=one(api,'ExternalSecret','weysure-app-config'); check(es['spec']['dataFrom'][0]['extract']['key']=='weysure/prod' and es['spec']['secretStoreRef']['name']=='vault', 'ExternalSecret from weysure/prod')
 ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='weysure-api.beyrictech.com' and ing['metadata']['annotations']['cert-manager.io/cluster-issuer']=='letsencrypt-prod', 'api ingress + cert')
