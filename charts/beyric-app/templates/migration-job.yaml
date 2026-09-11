@@ -32,6 +32,9 @@ spec:
           command: {{- toYaml ($m.command | required "migration.command is required") | nindent 12 }}
           env:
             - { name: VAULT_ENV_FILE, value: {{ printf "/vault/secrets/%s" .Values.vaultAgent.fileName | quote }} }
+            {{- range $k, $v := $m.env }}
+            - { name: {{ $k }}, value: {{ $v | toString | quote }} }
+            {{- end }}
           {{- if .Values.envFromSecrets }}
           envFrom:
             {{- range .Values.envFromSecrets }}
