@@ -1,0 +1,27 @@
+# weysure-api: charts/beyric-app rendered with the prod values and images.yaml.
+# images.yaml is the CI -> CD contract (ADR-005): a beyric-ci[bot] commit there
+# is a deployment. selfHeal stays off cluster-wide (ADR-012).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: weysure-api
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "9" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: charts/beyric-app
+    helm:
+      releaseName: weysure-api
+      valueFiles:
+        - ../../projects/weysure/environments/prod/apps/api/values.yaml
+        - ../../projects/weysure/environments/prod/images.yaml
+  destination: { server: https://kubernetes.default.svc, namespace: weysure-prod }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    retry:
+      limit: 3
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
