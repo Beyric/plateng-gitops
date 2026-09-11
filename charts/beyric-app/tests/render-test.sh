@@ -26,7 +26,8 @@ check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashico
 check('agent-pre-populate-only' not in str(a) and a.get('vault.hashicorp.com/agent-pre-populate')=='false', 'api uses sidecar only (single lease)')
 check('sslmode=require' in a['vault.hashicorp.com/agent-inject-template-env'] and '{{ .Data.password }}' in a['vault.hashicorp.com/agent-inject-template-env'], 'DATABASE_URL template renders creds with sslmode')
 check(pod['spec'].get('shareProcessNamespace') is True, 'api shares PID namespace for restart-on-rotate')
-check(c['securityContext']['readOnlyRootFilesystem'] and pod['spec']['securityContext']['runAsNonRoot'], 'api non-root read-only')
+check(c['securityContext']['readOnlyRootFilesystem'] and pod['spec']['securityContext']['runAsNonRoot'] and c['securityContext']['runAsUser']==1000, 'api non-root read-only, container runAsUser set')
+check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)') if False else None
 check(c['readinessProbe']['httpGet']['path']=='/api/v1/health' and c['startupProbe']['failureThreshold']==30, 'api probes')
 check({'configMapRef': {'name': 'api-config'}} in c['envFrom'] and {'secretRef': {'name': 'weysure-app-config'}} in c['envFrom'], 'api envFrom configmap + secret')
 cm=one(api,'ConfigMap','api-config')['data']; check(cm['RUN_MIGRATIONS']=='false' and cm['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='false', 'api config: no migrations, no scheduler')
@@ -38,6 +39,7 @@ check(job['metadata']['annotations']['argocd.argoproj.io/hook']=='PreSync' and '
 check(ja.get('vault.hashicorp.com/agent-pre-populate-only')=='true' and ja.get('vault.hashicorp.com/role')=='weysure-migrate', 'migration uses init-only agent with migrate role')
 sa=one(api,'ServiceAccount','db-migrate')['metadata']['annotations']; check(sa.get('argocd.argoproj.io/hook')=='PreSync' and sa.get('argocd.argoproj.io/sync-wave')=='-1', 'migration SA is a PreSync hook before the Job')
 jenv={e['name']:e.get('value') for e in job['spec']['template']['spec']['containers'][0]['env']}; check(jenv.get('SERVER_HOST','').startswith('https://') and 'VAULT_ENV_FILE' in jenv, 'migration job has SERVER_HOST + VAULT_ENV_FILE env')
+check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)')
 check(job['spec']['backoffLimit']==0 and job['spec']['template']['spec']['serviceAccountName']=='db-migrate', 'migration job SA + no retries')
 es=one(api,'ExternalSecret','weysure-app-config'); check(es['metadata']['annotations'].get('argocd.argoproj.io/hook')=='PreSync' and es['metadata']['annotations'].get('argocd.argoproj.io/sync-wave')=='-2', 'ExternalSecret is a PreSync hook before the migration Job'); check(es['spec']['dataFrom'][0]['extract']['key']=='weysure/prod' and es['spec']['secretStoreRef']['name']=='vault', 'ExternalSecret from weysure/prod')
 ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='weysure-api.beyrictech.com' and ing['metadata']['annotations']['cert-manager.io/cluster-issuer']=='letsencrypt-prod', 'api ingress + cert')
@@ -47,7 +49,7 @@ check(one(api,'ServiceAccount','api')['automountServiceAccountToken'] is True, '
 wd=one(web,'Deployment','web'); wp=wd['spec']['template']; wc=wp['spec']['containers'][0]
 check(wc['image'].endswith(':'+images['web']['tag']), 'web image tag from images.yaml')
 check('vault.hashicorp.com/agent-inject' not in str(wp['metadata'].get('annotations',{})), 'web has no vault agent')
-check(wp['spec']['securityContext']['runAsUser']==1001 and wc['securityContext']['readOnlyRootFilesystem'], 'web uid 1001 read-only')
+check(wp['spec']['securityContext']['runAsUser']==1001 and wc['securityContext']['runAsUser']==1001 and wc['securityContext']['readOnlyRootFilesystem'], 'web uid 1001 at pod and container level')
 check(one(web,'Ingress','web')['spec']['rules'][0]['host']=='weysure.beyrictech.com', 'web ingress host')
 check(not [d for d in web if d['kind'] in ('Job','ExternalSecret')], 'web has no migration/externalsecret')
 check(one(web,'ServiceAccount','web')['automountServiceAccountToken'] is False, 'web SA token not mounted')
