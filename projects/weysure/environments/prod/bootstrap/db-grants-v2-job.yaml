@@ -1,4 +1,6 @@
-# One-shot follow-up to db-bootstrap (Finding 32). PostgreSQL 16 removed a
+# One-shot follow-up to db-bootstrap (Finding 32). v2: the database and schema
+# grants run as the master user - on RDS, master (not vault) owns the database,
+# so v1's grants issued as vault granted nothing (Finding 34). PostgreSQL 16 removed a
 # role's implicit ADMIN OPTION on itself, so the Phase 5 weysure-migrate role
 # (`IN ROLE vault`) fails with "permission denied to grant role vault".
 #
@@ -11,7 +13,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: db-roles-pg16
+  name: db-grants-v2
   namespace: weysure-prod
   # Deliberately NOT an Argo hook and NO ttlSecondsAfterFinished (Finding 33):
   # a hook with HookSucceeded is re-created - and re-run - on every sync, and a
@@ -53,27 +55,27 @@ spec:
               export PGUSER=$(jq -r .username /scratch/master.json)
               export PGPASSWORD=$(jq -r .password /scratch/master.json)
               cat > /scratch/roles.sql <<'SQL'
-              -- Run as the RDS master user. Idempotent.
-              -- Master created `vault` in Phase 5, so it holds ADMIN OPTION on it and may join it.
-              GRANT vault TO CURRENT_USER;
-              -- Roles vault creates below are granted back to vault with SET+INHERIT (PG16).
-              SET createrole_self_grant = 'set, inherit';
+              -- Run as the RDS master user. Idempotent. Works whether the database is owned
+              -- by master (what Phase 5 produced on RDS) or by vault.
+              GRANT vault TO CURRENT_USER;                       -- master created vault -> holds ADMIN on it
+              SET createrole_self_grant = 'set, inherit';       -- roles vault creates are granted back to vault
               SET ROLE vault;
               DO $body$ BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'weysure_owner') THEN CREATE ROLE weysure_owner NOLOGIN; END IF;
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'weysure_app')   THEN CREATE ROLE weysure_app   NOLOGIN; END IF;
               END $body$;
-              -- (vault, as creator, already holds ADMIN + SET/INHERIT on both via createrole_self_grant)
+              RESET ROLE;                                        -- grants below need the database/schema OWNER: master
               GRANT ALL PRIVILEGES ON DATABASE weysure TO weysure_owner;
               GRANT CONNECT       ON DATABASE weysure TO weysure_app;
               \c weysure
-              SET ROLE vault;
               GRANT ALL   ON SCHEMA public TO weysure_owner;
               GRANT USAGE ON SCHEMA public TO weysure_app;
               ALTER DEFAULT PRIVILEGES FOR ROLE weysure_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES    TO weysure_app;
               ALTER DEFAULT PRIVILEGES FOR ROLE weysure_owner IN SCHEMA public GRANT USAGE, SELECT               ON SEQUENCES TO weysure_app;
               GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO weysure_app;
               GRANT USAGE, SELECT               ON ALL SEQUENCES IN SCHEMA public TO weysure_app;
+              SELECT d.datname, pg_get_userbyid(d.datdba) AS db_owner, pg_get_userbyid(n.nspowner) AS public_schema_owner
+                FROM pg_database d, pg_namespace n WHERE d.datname = current_database() AND n.nspname = 'public';
               SQL
               psql -v ON_ERROR_STOP=1 -q -f /scratch/roles.sql
               rm -f /scratch/master.json /scratch/roles.sql
