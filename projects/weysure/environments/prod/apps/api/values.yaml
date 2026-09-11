@@ -21,7 +21,25 @@ migration:
   enabled: true
   vaultRole: weysure-migrate
   dbCredsPath: database/creds/weysure-migrate
-  command: ["/bin/bash", "-c", "set -a; . \"$VAULT_ENV_FILE\"; set +a; cd /app && alembic upgrade head"]
+  # The API's Alembic history cannot build a database from empty: no revision
+  # creates `users` (it predates Alembic). First run on an empty database:
+  # create the schema from the models and stamp head; every later run is a
+  # normal `alembic upgrade head` (Finding 35, developer follow-up filed).
+  command:
+    - /bin/bash
+    - -c
+    - |
+      set -euo pipefail
+      set -a; . "$VAULT_ENV_FILE"; set +a
+      cd /app
+      if [ -z "$(alembic current 2>/dev/null)" ]; then
+        echo "empty database: creating schema from models, stamping head"
+        python -c "from app.main import app; from app.db.base import Base; from app.db.session import engine; Base.metadata.create_all(bind=engine); print('created', len(Base.metadata.tables), 'tables')"
+        alembic stamp head
+      else
+        alembic upgrade head
+      fi
+      alembic current
   env:
     ENVIRONMENT: production
     SERVER_HOST: https://weysure-api.beyrictech.com   # Settings() validates it as a URL even for alembic
