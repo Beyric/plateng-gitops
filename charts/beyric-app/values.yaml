@@ -71,6 +71,9 @@ migration:
   vaultRole: ""
   dbCredsPath: ""
   command: []
+  # Plain env for the Job. It cannot use the components' ConfigMaps: those are
+  # ordinary resources and do not exist yet when PreSync hooks run.
+  env: {}
   activeDeadlineSeconds: 600
   resources:
     requests: { cpu: 100m, memory: 256Mi }

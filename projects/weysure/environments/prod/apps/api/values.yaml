@@ -22,6 +22,9 @@ migration:
   vaultRole: weysure-migrate
   dbCredsPath: database/creds/weysure-migrate
   command: ["/bin/bash", "-c", "set -a; . \"$VAULT_ENV_FILE\"; set +a; cd /app && alembic upgrade head"]
+  env:
+    ENVIRONMENT: production
+    SERVER_HOST: https://weysure-api.beyrictech.com   # Settings() validates it as a URL even for alembic
 
 # Non-secret configuration shared by both API workloads.
 commonEnv: &commonEnv

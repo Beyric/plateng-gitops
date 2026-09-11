@@ -17,6 +17,10 @@ injector:
   enabled: true
   replicas: 1
   failurePolicy: Ignore          # a webhook outage must never block pod creation cluster-wide
+  # The EKS control plane reaches nodes only on the ports the eks module opens
+  # (443, 4443, 6443, 8443, 9443, 10250, 10251). The injector's default 8080 is
+  # not among them, so the webhook silently never fired (Finding 31).
+  port: 8443
   namespaceSelector:
     matchLabels:
       vault-injection: enabled
