@@ -1,0 +1,30 @@
+{{- range $name, $c := .Values.components }}
+{{- $ing := $c.ingress | default dict }}
+{{- if and (eq (include "beyric-app.enabled" $c) "true") $ing.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    cert-manager.io/cluster-issuer: {{ $ing.clusterIssuer | default "letsencrypt-prod" }}
+spec:
+  ingressClassName: {{ $ing.className | default "traefik" }}
+  tls:
+    - secretName: {{ $name }}-tls
+      hosts: [{{ $ing.host | required (printf "components.%s.ingress.host is required" $name) }}]
+  rules:
+    - host: {{ $ing.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: { name: http }
+{{- end }}
+{{- end }}

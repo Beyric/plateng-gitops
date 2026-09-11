@@ -1,0 +1,16 @@
+{{- range $name, $c := .Values.components }}
+{{- if and (eq (include "beyric-app.enabled" $c) "true") $c.env }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+  annotations: { argocd.argoproj.io/sync-wave: "0" }
+data:
+  {{- range $k, $v := $c.env }}
+  {{ $k }}: {{ $v | toString | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

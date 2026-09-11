@@ -13,7 +13,7 @@ spec:
     repoURL: https://github.com/Beyric/plateng-gitops
     targetRevision: main
     path: projects/weysure/environments/prod
-    directory: { recurse: true }
+    directory: { recurse: true, exclude: 'apps/**' }
   destination: { server: https://kubernetes.default.svc, namespace: weysure-prod }
   syncPolicy:
     automated: { prune: true, selfHeal: false }

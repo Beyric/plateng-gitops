@@ -9,11 +9,26 @@
 global:
   enabled: true
 
-# The Agent Injector mounts secrets as files via sidecars. We use External
-# Secrets Operator instead (ADR-008), which produces native Kubernetes Secrets
-# and keeps application manifests portable across secret backends.
+# Static secrets go through External Secrets Operator (ADR-008). The Agent
+# Injector is enabled only for *leased* credentials - the database engine's
+# per-pod users - which ESO cannot renew (Phase 7 spec D2, ADR-021). The
+# webhook only mutates pods in namespaces labelled vault-injection=enabled.
 injector:
-  enabled: false
+  enabled: true
+  replicas: 1
+  failurePolicy: Ignore          # a webhook outage must never block pod creation cluster-wide
+  namespaceSelector:
+    matchLabels:
+      vault-injection: enabled
+  nodeSelector:
+    node-role: system
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }
+  agentDefaults:
+    cpuRequest: 20m
+    memRequest: 32Mi
+    memLimit: 64Mi
 
 server:
   # Pinned so an Argo CD sync cannot silently move Vault's version.

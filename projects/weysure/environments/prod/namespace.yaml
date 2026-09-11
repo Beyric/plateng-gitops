@@ -5,6 +5,7 @@ metadata:
   labels:
     project: weysure
     environment: prod
+    vault-injection: enabled
 ---
 # The pod identity association in Terraform (rds.tf) targets exactly this
 # namespace + ServiceAccount pair. Rename either and the Job loses AWS access
