@@ -2,5 +2,5 @@ apiVersion: v2
 name: beyric-app
 description: Library-style chart for Beyric services - one implementation of Deployment, Service, Ingress, PDB, HPA, Vault Agent and migration hook; each app is a values file.
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0"

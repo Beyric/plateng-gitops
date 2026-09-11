@@ -13,12 +13,12 @@ kind: Job
 metadata:
   name: db-roles-pg16
   namespace: weysure-prod
-  annotations:
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+  # Deliberately NOT an Argo hook and NO ttlSecondsAfterFinished (Finding 33):
+  # a hook with HookSucceeded is re-created - and re-run - on every sync, and a
+  # TTL-deleted Job is re-created by the next sync. A plain Job is immutable:
+  # Argo applies it once and it stays Complete as the record of what ran.
 spec:
   backoffLimit: 2
-  ttlSecondsAfterFinished: 3600
   template:
     spec:
       serviceAccountName: db-bootstrap
