@@ -1,0 +1,104 @@
+{{- range $name, $c := .Values.components }}
+{{- if eq (include "beyric-app.enabled" $c) "true" }}
+{{- $probes := $c.probes | default dict }}
+{{- $writable := $c.writableDirs | default (list "/tmp") }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    {{- if $c.env }}
+    configmap.reloader.stakater.com/reload: {{ printf "%s-config" $name | quote }}
+    {{- end }}
+    {{- if $.Values.envFromSecrets }}
+    secret.reloader.stakater.com/reload: {{ join "," $.Values.envFromSecrets | quote }}
+    {{- end }}
+spec:
+  replicas: {{ $c.replicas | default 1 }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{- include "beyric-app.selector" (dict "root" $ "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 8 }}
+      {{- if $c.vaultAgent }}
+      annotations:
+        {{- include "beyric-app.vaultAnnotations" (dict "root" $ "role" $.Values.vaultAgent.role "credsPath" $.Values.vaultAgent.dbCredsPath "mode" "sidecar") | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $c.serviceAccount | default $name }}
+      {{- if $c.vaultAgent }}
+      shareProcessNamespace: true
+      {{- end }}
+      nodeSelector: {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      securityContext: {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds | default 30 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "beyric-app.selector" (dict "root" $ "name" $name) | nindent 14 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "beyric-app.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- with $c.command }}
+          command: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
+          {{- if $c.port }}
+          ports:
+            - { name: http, containerPort: {{ $c.port }}, protocol: TCP }
+          startupProbe:
+            httpGet: { path: {{ $probes.path | default "/" }}, port: http }
+            periodSeconds: 5
+            failureThreshold: {{ $probes.startupFailureThreshold | default 30 }}
+          readinessProbe:
+            httpGet: { path: {{ $probes.path | default "/" }}, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: {{ $probes.path | default "/" }}, port: http }
+            periodSeconds: 30
+            failureThreshold: 3
+          {{- end }}
+          {{- if or $c.env $.Values.envFromSecrets }}
+          envFrom:
+            {{- if $c.env }}
+            - configMapRef: { name: {{ $name }}-config }
+            {{- end }}
+            {{- range $.Values.envFromSecrets }}
+            - secretRef: { name: {{ . }} }
+            {{- end }}
+          {{- end }}
+          {{- if $c.vaultAgent }}
+          env:
+            - { name: VAULT_ENV_FILE, value: {{ printf "/vault/secrets/%s" $.Values.vaultAgent.fileName | quote }} }
+          {{- end }}
+          {{- with $c.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep {{ $c.preStopSleep | default 5 }}"] }
+          volumeMounts:
+            {{- range $i, $d := $writable }}
+            - { name: writable-{{ $i }}, mountPath: {{ $d }} }
+            {{- end }}
+      volumes:
+        {{- range $i, $d := $writable }}
+        - { name: writable-{{ $i }}, emptyDir: {} }
+        {{- end }}
+{{- end }}
+{{- end }}

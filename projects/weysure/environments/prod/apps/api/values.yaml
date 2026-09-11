@@ -1,0 +1,65 @@
+# weysure-api on beyric-prod. Rendered by charts/beyric-app; the image tag comes
+# from ../../images.yaml (imageTagKey) which Jenkins updates on every green build.
+image:
+  repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-api
+imageTagKey: api
+
+envFromSecrets: [weysure-app-config]
+
+externalSecret:
+  enabled: true
+  name: weysure-app-config
+  vaultPath: weysure/prod
+
+vaultAgent:
+  role: weysure-api
+  dbCredsPath: database/creds/weysure-app
+  dbHost: weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com
+  dbName: weysure
+
+migration:
+  enabled: true
+  vaultRole: weysure-migrate
+  dbCredsPath: database/creds/weysure-migrate
+  command: ["/bin/bash", "-c", "set -a; . \"$VAULT_ENV_FILE\"; set +a; cd /app && alembic upgrade head"]
+
+# Non-secret configuration shared by both API workloads.
+commonEnv: &commonEnv
+  ENVIRONMENT: production
+  SERVER_HOST: https://weysure-api.beyrictech.com
+  FRONTEND_URL: https://weysure.beyrictech.com
+  BACKEND_CORS_ORIGINS: '["https://weysure.beyrictech.com"]'
+  REDIS_URL: redis://redis:6379/0
+  RUN_MIGRATIONS: "false"          # the PreSync Job owns migrations (spec D3)
+  WEB_CONCURRENCY: "2"
+  WALLET_RECONCILIATION_SCHEDULER_ENABLED: "false"
+
+components:
+  api:
+    replicas: 2
+    port: 8000
+    vaultAgent: true
+    env: *commonEnv
+    ingress: { enabled: true, host: weysure-api.beyrictech.com }
+    probes: { path: /api/v1/health }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
+    pdb: { enabled: true, minAvailable: 1 }
+    terminationGracePeriodSeconds: 60
+  api-scheduler:
+    replicas: 1
+    vaultAgent: true
+    env:
+      <<: *commonEnv
+      WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"
+      WALLET_RECONCILIATION_INTERVAL_MINUTES: "30"
+      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"
+    resources:
+      requests: { cpu: 100m, memory: 384Mi }
+      limits: { cpu: 500m, memory: 768Mi }
+    # single replica: still needs a port for probes -> the API serves them; no Service/Ingress
+    port: 8000
+    service: { enabled: false }
+    probes: { path: /api/v1/health }

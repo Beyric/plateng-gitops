@@ -8,6 +8,8 @@ repos:
   - repo: local
     hooks:
       - id: no-plaintext-secrets
+        # Helm templates are not YAML until rendered; charts/*/tests/render-test.sh covers them.
+        exclude: ^charts/.*/templates/
         name: Reject Kubernetes Secrets carrying literal key material
         entry: scripts/no-plaintext-secrets.py
         language: python
@@ -22,4 +24,5 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
         args: ["--allow-multiple-documents"]
+        exclude: ^charts/.*/templates/
       - id: detect-private-key

@@ -1,0 +1,17 @@
+{{- range $name, $c := .Values.components }}
+{{- if and (eq (include "beyric-app.enabled" $c) "true") $c.port (eq (include "beyric-app.enabled" ($c.service | default dict)) "true") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 4 }}
+  annotations: { argocd.argoproj.io/sync-wave: "0" }
+spec:
+  type: ClusterIP
+  selector: {{- include "beyric-app.selector" (dict "root" $ "name" $name) | nindent 4 }}
+  ports:
+    - { name: http, port: 80, targetPort: http, protocol: TCP }
+{{- end }}
+{{- end }}

@@ -1,0 +1,46 @@
+{{- if .Values.migration.enabled }}
+{{- $m := .Values.migration }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-migrate
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "beyric-app.labels" (dict "root" . "name" "db-migrate") | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ $m.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {{- include "beyric-app.labels" (dict "root" . "name" "db-migrate") | nindent 8 }}
+      annotations:
+        {{- include "beyric-app.vaultAnnotations" (dict "root" . "role" $m.vaultRole "credsPath" $m.dbCredsPath "mode" "init") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $m.serviceAccount }}
+      nodeSelector: {{- toYaml .Values.nodeSelector | nindent 8 }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "beyric-app.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: {{- toYaml ($m.command | required "migration.command is required") | nindent 12 }}
+          env:
+            - { name: VAULT_ENV_FILE, value: {{ printf "/vault/secrets/%s" .Values.vaultAgent.fileName | quote }} }
+          {{- if .Values.envFromSecrets }}
+          envFrom:
+            {{- range .Values.envFromSecrets }}
+            - secretRef: { name: {{ . }} }
+            {{- end }}
+          {{- end }}
+          resources: {{- toYaml $m.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+{{- end }}

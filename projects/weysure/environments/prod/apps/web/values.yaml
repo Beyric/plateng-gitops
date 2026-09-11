@@ -1,0 +1,28 @@
+# weysure-web on beyric-prod. NEXT_PUBLIC_* values are baked at build time by
+# Jenkins; the runtime image holds no secrets (Phase 7 spec §2).
+image:
+  repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-web
+imageTagKey: web
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile: { type: RuntimeDefault }
+
+components:
+  web:
+    replicas: 2
+    port: 3000
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    ingress: { enabled: true, host: weysure.beyrictech.com }
+    probes: { path: / }
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
+    pdb: { enabled: true, minAvailable: 1 }
+    writableDirs: [/tmp, /app/.next/cache]

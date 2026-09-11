@@ -1,0 +1,85 @@
+# beyric-app defaults. An app's values file overrides these; the image tag
+# comes from environments/<env>/images.yaml (the CI -> CD contract, ADR-005).
+
+image:
+  repository: ""
+  tag: ""          # set explicitly, or leave empty and set imageTagKey
+  pullPolicy: IfNotPresent
+# Key in images.yaml whose `.tag` supplies image.tag (e.g. "api" -> .Values.api.tag).
+imageTagKey: ""
+
+nodeSelector:
+  node-role: workload
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile: { type: RuntimeDefault }
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }
+
+# Secrets (already in the namespace, e.g. from an ExternalSecret) exposed with envFrom.
+envFromSecrets: []
+
+# Vault Agent sidecar: per-pod dynamic database credential rendered to a file
+# the entrypoint sources (Phase 7 spec D2). Components opt in with vaultAgent: true.
+vaultAgent:
+  role: ""                 # auth/kubernetes role
+  dbCredsPath: ""          # database/creds/<role>
+  dbHost: ""
+  dbPort: 5432
+  dbName: ""
+  sslmode: require
+  fileName: env            # rendered at /vault/secrets/<fileName>
+  # Run after every re-render, i.e. when the lease hits max TTL and a new
+  # credential is minted. The agent runs as the app's uid in a shared PID
+  # namespace so it can SIGTERM the server; the container restarts and the
+  # entrypoint sources the new file. `[b]in` keeps pkill from matching itself.
+  restartCommand: sh -c "pkill -TERM -f '[b]in/gunicorn' || true"
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+components: {}
+#  api:
+#    replicas: 2
+#    port: 8000               # omit/null -> no Service, no probes on a port
+#    command: []              # image default when empty
+#    args: []
+#    env: {}                  # non-secret config -> ConfigMap (Reloader watches it)
+#    serviceAccount: ""       # defaults to the component name
+#    service: { enabled: true }
+#    ingress: { enabled: false, host: "", clusterIssuer: letsencrypt-prod, className: traefik }
+#    probes: { path: /, startupFailureThreshold: 30 }
+#    resources: {}
+#    hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, cpu: 70 }
+#    pdb: { enabled: false, minAvailable: 1 }
+#    terminationGracePeriodSeconds: 30
+#    preStopSleep: 5
+#    vaultAgent: false
+#    writableDirs: [/tmp]     # emptyDirs because the root filesystem is read-only
+
+# Argo CD PreSync Job running schema migrations with a Vault init container only
+# (agent-pre-populate-only), so the Job can complete.
+migration:
+  enabled: false
+  serviceAccount: db-migrate
+  vaultRole: ""
+  dbCredsPath: ""
+  command: []
+  activeDeadlineSeconds: 600
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# App secrets from Vault KV via External Secrets Operator (ADR-019 dataFrom.extract).
+externalSecret:
+  enabled: false
+  name: ""
+  vaultPath: ""            # e.g. weysure/prod (under the `secret/` mount)
+  refreshInterval: 1h
+  clusterSecretStore: vault
