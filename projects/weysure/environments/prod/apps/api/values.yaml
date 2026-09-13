@@ -51,9 +51,12 @@ components:
     hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     pdb: { enabled: true, minAvailable: 1 }
     terminationGracePeriodSeconds: 60
-    # loguru also writes to /app/logs at import time; the root filesystem is
-    # read-only, so give it an emptyDir. stdout is still what the cluster collects.
-    writableDirs: [/tmp, /app/logs]
+    # The only filesystem writes in the code base (grep'd): loguru's file sink
+    # under /app/logs and KYC uploads under /app/uploads, both at import time.
+    # emptyDirs let the pod boot. /app/uploads is per-pod and ephemeral - KYC
+    # documents do not survive a restart and are not shared between replicas.
+    # Developer follow-up (high): store uploads in S3/Cloudinary, not on disk.
+    writableDirs: [/tmp, /app/logs, /app/uploads]
   api-scheduler:
     replicas: 1
     vaultAgent: true
@@ -69,4 +72,4 @@ components:
     port: 8000
     service: { enabled: false }
     probes: { path: /api/v1/health }
-    writableDirs: [/tmp, /app/logs]
+    writableDirs: [/tmp, /app/logs, /app/uploads]
