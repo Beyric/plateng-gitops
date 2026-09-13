@@ -51,6 +51,9 @@ components:
     hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     pdb: { enabled: true, minAvailable: 1 }
     terminationGracePeriodSeconds: 60
+    # loguru also writes to /app/logs at import time; the root filesystem is
+    # read-only, so give it an emptyDir. stdout is still what the cluster collects.
+    writableDirs: [/tmp, /app/logs]
   api-scheduler:
     replicas: 1
     vaultAgent: true
@@ -66,3 +69,4 @@ components:
     port: 8000
     service: { enabled: false }
     probes: { path: /api/v1/health }
+    writableDirs: [/tmp, /app/logs]
