@@ -45,6 +45,23 @@ spec:
         ingressClass: { enabled: true, isDefaultClass: true }
         resources:
           requests: { cpu: 50m, memory: 96Mi }
+        # The single ingress replica was evicted by Karpenter drift during the
+        # 1.32 upgrade and every host went dark for ~50 s (Finding 38). Two
+        # replicas, one per system node, and a budget of one.
+        deployment:
+          replicas: 2
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        nodeSelector:
+          node-role: system
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
   destination: { server: https://kubernetes.default.svc, namespace: traefik }
   syncPolicy:
     automated: { prune: true, selfHeal: false }
