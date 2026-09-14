@@ -78,6 +78,11 @@ server:
   ha:
     enabled: true
     replicas: 1 # ADR-007: 3-replica Raft HA when node capacity allows
+    # With one replica the chart's PDB computes maxUnavailable 0, which blocks
+    # every node drain forever and fails EKS node-group upgrades after 15 min
+    # (Finding 37). It protects nothing at 1 replica. Re-enable at replicas 3.
+    disruptionBudget:
+      enabled: false
     raft:
       enabled: true
       setNodeId: true
