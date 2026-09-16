@@ -1,0 +1,83 @@
+# Phase 8 (spec D6): explicit allows for weysure-prod. Applied BEFORE
+# default-deny.yaml (separate PR) so nothing is cut off between syncs.
+# Enforced by the VPC CNI network-policy agent (Terraform: enableNetworkPolicy).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: weysure-prod }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+# Traefik (its own namespace) is the only thing allowed to reach the web and API pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: api-ingress-from-traefik, namespace: weysure-prod }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: api } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
+      ports: [{ protocol: TCP, port: 8000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: web-ingress-from-traefik, namespace: weysure-prod }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: web } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
+      ports: [{ protocol: TCP, port: 3000 }]
+---
+# API workloads (api, api-scheduler, migration Job): RDS in the VPC, Redis,
+# Vault (agent sidecar shares the pod), and HTTPS/SMTP to the internet
+# (Paystack, Cloudinary, mail). The VPC CIDR entry also covers the EKS API
+# server endpoint the Vault agent never needs but the SDKs may probe.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: api-egress, namespace: weysure-prod }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, db-migrate] }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 10.0.0.0/16 } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ protocol: TCP, port: 6379 }]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: vault } }
+      ports: [{ protocol: TCP, port: 8200 }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/16] } }]
+      ports: [{ protocol: TCP, port: 443 }, { protocol: TCP, port: 587 }, { protocol: TCP, port: 465 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: redis-ingress-from-api, namespace: weysure-prod }
+spec:
+  podSelector: { matchLabels: { app: redis } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, db-migrate] }
+      ports: [{ protocol: TCP, port: 6379 }]
+---
+# web has no outbound needs: NEXT_PUBLIC_* URLs are called by the browser, not the pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: web-egress-none, namespace: weysure-prod }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: web } }
+  policyTypes: [Egress]
+  egress: []
