@@ -26,8 +26,12 @@ spec:
             service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
             service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
             service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+            # Health check straight at the pod (ip targets): Traefik's /ping lives on
+            # the internal entrypoint, container port 8080, which the Service does not
+            # expose - so the port is numeric, not a Service port name.
+            service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
             service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/ping"
-            service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "traefik"
+            service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
             service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "deregistration_delay.timeout_seconds=30"
         # Chart 41 removed the ports.web.redirectTo, ports.websecure.tls and
         # top-level logs values. Everything below is expressed as Traefik's own
