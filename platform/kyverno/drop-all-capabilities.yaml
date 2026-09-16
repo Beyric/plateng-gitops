@@ -1,0 +1,24 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: drop-all-capabilities
+  annotations:
+    policies.kyverno.io/description: "Containers drop every Linux capability."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "securityContext.capabilities.drop must include ALL."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: [ALL]

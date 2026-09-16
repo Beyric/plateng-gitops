@@ -1,0 +1,22 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ro-rootfs
+  annotations:
+    policies.kyverno.io/description: "Root filesystem is read-only; writable paths are explicit volumes."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-ro-rootfs
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "securityContext.readOnlyRootFilesystem must be true."
+        pattern:
+          spec:
+            containers:
+              - securityContext: { readOnlyRootFilesystem: true }

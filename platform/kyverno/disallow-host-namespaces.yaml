@@ -1,0 +1,23 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-host-namespaces
+  annotations:
+    policies.kyverno.io/description: "No host PID/IPC/network."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: disallow-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "hostPID, hostIPC and hostNetwork are not allowed."
+        pattern:
+          spec:
+            =(hostPID): "false"
+            =(hostIPC): "false"
+            =(hostNetwork): "false"

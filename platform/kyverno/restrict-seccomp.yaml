@@ -1,0 +1,23 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-seccomp
+  annotations:
+    policies.kyverno.io/description: "Seccomp profile is RuntimeDefault (or Localhost)."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: restrict-seccomp
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "seccompProfile.type must be RuntimeDefault or Localhost."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
