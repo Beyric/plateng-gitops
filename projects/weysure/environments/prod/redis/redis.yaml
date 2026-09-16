@@ -27,6 +27,10 @@ spec:
   template:
     metadata:
       labels: { app: redis }
+      # Phase 8 (spec D4): a single-replica cache must not be evicted by Karpenter
+      # consolidation or drift (it was, during the EKS upgrade). A PDB would block
+      # every drain at one replica (Finding 37); this only blocks voluntary ones.
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
     spec:
       # Application tier: Karpenter, not the system node. Without this the
       # scheduler placed it wherever there was room, which was the system node.

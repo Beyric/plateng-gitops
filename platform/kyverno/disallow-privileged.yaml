@@ -1,0 +1,24 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged
+  annotations:
+    policies.kyverno.io/description: "No privileged containers, no privilege escalation."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: disallow-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "privileged and allowPrivilegeEscalation must be false."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  =(privileged): "false"
+                  =(allowPrivilegeEscalation): "false"

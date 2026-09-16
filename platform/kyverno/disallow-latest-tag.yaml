@@ -1,0 +1,25 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/description: "Images must use a fixed tag, never :latest or untagged (Finding 11)."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "Image '{{ element.image }}' must carry a fixed tag, not :latest."
+        foreach:
+          - list: request.object.spec.containers
+            deny:
+              conditions:
+                any:
+                  - { key: "{{ element.image }}", operator: AnyIn, value: ["*:latest"] }
+                  - { key: "{{ element.image }}", operator: AnyNotIn, value: ["*:*"] }

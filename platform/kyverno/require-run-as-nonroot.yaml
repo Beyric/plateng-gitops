@@ -1,0 +1,24 @@
+# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-nonroot
+  annotations:
+    policies.kyverno.io/description: "Pods run as a non-root user."
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: require-run-as-nonroot
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "runAsNonRoot must be true at pod or container level."
+        anyPattern:
+          - spec:
+              securityContext: { runAsNonRoot: true }
+          - spec:
+              containers:
+                - securityContext: { runAsNonRoot: true }
