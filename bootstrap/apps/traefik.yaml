@@ -18,9 +18,17 @@ spec:
           annotations:
             # NLB, not the default Classic ELB: layer 4, far cheaper, and it
             # preserves the client connection for Cloudflare to terminate.
-            service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+            # "external" hands this Service to the AWS Load Balancer Controller
+            # (Phase 8, spec D1); the in-tree controller ignores it from then on.
+            # Targets are Traefik pod IPs, registered only when the readiness gate
+            # passes and deregistered before the pod stops - no node-roll blips.
+            service.beta.kubernetes.io/aws-load-balancer-type: "external"
+            service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
             service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
             service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+            service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/ping"
+            service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "traefik"
+            service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "deregistration_delay.timeout_seconds=30"
         # Chart 41 removed the ports.web.redirectTo, ports.websecure.tls and
         # top-level logs values. Everything below is expressed as Traefik's own
         # CLI flags instead, which have been stable for years and are not
@@ -64,5 +72,7 @@ spec:
                 app.kubernetes.io/name: traefik
   destination: { server: https://kubernetes.default.svc, namespace: traefik }
   syncPolicy:
+    managedNamespaceMetadata:
+      labels: { elbv2.k8s.aws/pod-readiness-gate-inject: enabled }
     automated: { prune: true, selfHeal: false }
     syncOptions: [CreateNamespace=true]
