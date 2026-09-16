@@ -1,0 +1,9 @@
+# Phase 8 (spec D6), second PR: with the allows in allow.yaml synced and verified,
+# everything else in weysure-prod is denied - both directions, every pod.
+# Kubelet probes and the VPC CNI agent are not subject to NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: weysure-prod }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
