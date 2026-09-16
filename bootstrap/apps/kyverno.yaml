@@ -6,7 +6,10 @@ kind: Application
 metadata:
   name: kyverno
   namespace: argocd
-  annotations: { argocd.argoproj.io/sync-wave: "3" }
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    # Kyverno mutates its own CRDs/webhooks after install; diff server-side (platform notes).
+    argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
   finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
   project: default
@@ -27,6 +30,7 @@ spec:
         reportsController: { nodeSelector: { node-role: system } }
         # Never block the platform's own namespaces on a webhook outage.
         config:
+          preserve: false   # Kyverno platform notes for Argo CD
           webhooks:
             namespaceSelector:
               matchExpressions:

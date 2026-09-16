@@ -9,17 +9,25 @@ spec:
   validationFailureAction: Audit
   background: true
   rules:
-    - name: disallow-latest-tag
+    - name: require-image-tag
       match:
         any:
           - resources:
               kinds: [Pod]
       validate:
-        message: "Image '{{ element.image }}' must carry a fixed tag, not :latest."
-        foreach:
-          - list: request.object.spec.containers
-            deny:
-              conditions:
-                any:
-                  - { key: "{{ element.image }}", operator: AnyIn, value: ["*:latest"] }
-                  - { key: "{{ element.image }}", operator: AnyNotIn, value: ["*:*"] }
+        message: "Every image must carry an explicit tag or digest."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: no-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        message: "The :latest tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"

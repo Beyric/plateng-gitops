@@ -1,0 +1,36 @@
+# AWS Load Balancer Controller (Phase 8, spec D1). Owns the Traefik NLB with
+# pod-IP targets and readiness gates, so a node roll never leaves a terminated
+# node registered (Finding 39). AWS permissions via EKS Pod Identity created in
+# Terraform (lbc.tf) for kube-system/aws-load-balancer-controller.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "3" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: 3.5.0
+    helm:
+      valuesObject:
+        clusterName: beyric-prod
+        region: us-east-1
+        vpcId: vpc-0f31b251bbfab9764
+        replicaCount: 2
+        nodeSelector: { node-role: system }
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller   # must match the pod identity association
+        # The in-tree controller keeps serving Services without the "external"
+        # annotation; only Traefik's Service opts in (platform/traefik).
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits: { memory: 256Mi }
+  destination: { server: https://kubernetes.default.svc, namespace: kube-system }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }
