@@ -1,0 +1,95 @@
+# One-shot (ADR-022: plain Job, no hook, no TTL). Finding 41: five Vault-minted
+# Postgres roles from 4-11 Sept cannot be revoked. They were created with the
+# Phase 5 SQL, which granted privileges directly to each user; Vault revokes with
+# the role's *current* statement - a plain DROP ROLE - and Postgres refuses:
+# "cannot be dropped because some objects depend on it". Their passwords are long
+# past VALID UNTIL. As master -> SET ROLE vault, this drops only v-* roles expired
+# for more than a day, so live credentials are never touched. Reproduced and
+# proven locally on postgres:16. Vault's five leases are then force-revoked by hand.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-orphan-roles-v1
+  namespace: weysure-prod
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: db-maintenance }
+    spec:
+      serviceAccountName: db-bootstrap
+      restartPolicy: Never
+      nodeSelector: { node-role: workload }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: scratch
+          emptyDir: { medium: Memory }
+      initContainers:
+        - name: fetch-master-secret
+          image: public.ecr.aws/aws-cli/aws-cli:2.22.35
+          securityContext: &sc
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: [ALL] }
+          env:
+            - { name: AWS_REGION, value: us-east-1 }
+            - { name: HOME, value: /scratch }
+            - { name: SECRET_ARN, value: "arn:aws:secretsmanager:us-east-1:767397877316:secret:rds!db-c396f13d-c4f7-4672-8d0f-4b9929190102-SIlkgw" }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              umask 077
+              aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" \
+                --query SecretString --output text > /scratch/master.json
+              echo "master secret fetched"
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]
+      containers:
+        - name: drop-orphan-roles
+          image: postgres:16-alpine
+          securityContext: *sc
+          env:
+            - { name: PGHOST, value: weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com }
+            - { name: PGPORT, value: "5432" }
+            - { name: PGDATABASE, value: weysure }
+            - { name: PGSSLMODE, value: require }
+            - { name: HOME, value: /scratch }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              # RDS-managed passwords never contain a double quote, so a sed extract is safe; no jq (no root, no apk).
+              export PGUSER=$(sed -n 's/.*"username":"\([^"]*\)".*/\1/p' /scratch/master.json)
+              export PGPASSWORD=$(sed -n 's/.*"password":"\([^"]*\)".*/\1/p' /scratch/master.json | sed 's/\\\\/\\/g')
+              cat > /scratch/orphans.sql <<'SQL'
+              -- Run as the RDS master, connected to the weysure database. Idempotent.
+              -- Drops Vault-minted roles (v-...) whose password expired more than a day ago:
+              -- leftovers of the Phase 5 role SQL, which granted privileges directly to each
+              -- user, so the current revocation statement (plain DROP ROLE) cannot remove them.
+              SET ROLE vault;                       -- vault created them -> holds ADMIN OPTION on them
+              DO $body$
+              DECLARE r record;
+              BEGIN
+                FOR r IN SELECT rolname FROM pg_roles
+                         WHERE rolname LIKE 'v-%' AND rolvaliduntil < now() - interval '1 day'
+                LOOP
+                  EXECUTE format('GRANT %I TO vault', r.rolname);        -- need the role''s privileges to DROP OWNED
+                  EXECUTE format('DROP OWNED BY %I', r.rolname);         -- direct grants + default-ACL entries
+                  EXECUTE format('DROP ROLE %I', r.rolname);
+                  RAISE NOTICE 'dropped %', r.rolname;
+                END LOOP;
+              END $body$;
+              RESET ROLE;
+              SELECT count(*) AS expired_vault_roles_left FROM pg_roles WHERE rolname LIKE 'v-%' AND rolvaliduntil < now();
+              SQL
+              psql -v ON_ERROR_STOP=1 -f /scratch/orphans.sql
+              rm -f /scratch/master.json /scratch/orphans.sql
+              echo "orphan role cleanup complete"
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]
