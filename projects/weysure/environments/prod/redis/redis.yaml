@@ -35,7 +35,14 @@ spec:
       # Application tier: Karpenter, not the system node. Without this the
       # scheduler placed it wherever there was room, which was the system node.
       nodeSelector: { node-role: workload }
-      securityContext: { runAsNonRoot: true, runAsUser: 999, fsGroup: 999 }
+      # Same baseline the beyric-app chart gives api/web, so the namespace can go
+      # to Kyverno Enforce (Phase 8, spec D5). Redis only ever writes to /data.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: redis
           image: redis:8.2-alpine
@@ -46,6 +53,11 @@ spec:
             - 200mb
             - --maxmemory-policy
             - allkeys-lru        # cache semantics: evict, never refuse writes
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
           ports: [{ name: redis, containerPort: 6379 }]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
@@ -56,7 +68,11 @@ spec:
           livenessProbe:
             exec: { command: [redis-cli, ping] }
             periodSeconds: 15
-          volumeMounts: [{ name: data, mountPath: /data }]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:

@@ -1,0 +1,23 @@
+# The one-shot db-grants-v2 Job (ADR-022) ran once on 2026-09-11 and is kept,
+# Completed, as the record. Jobs are immutable and it will never run again, so
+# its pod spec (postgres/aws-cli/vault images as root, no read-only rootfs)
+# cannot be brought under the baseline. Scoped to that Job's pods only.
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: db-grants-v2-completed-job
+  namespace: weysure-prod
+spec:
+  exceptions:
+    - { policyName: disallow-privileged, ruleNames: [disallow-privileged, autogen-disallow-privileged] }
+    - { policyName: drop-all-capabilities, ruleNames: [drop-all-capabilities, autogen-drop-all-capabilities] }
+    - { policyName: require-requests-limits, ruleNames: [require-requests-limits, autogen-require-requests-limits] }
+    - { policyName: require-ro-rootfs, ruleNames: [require-ro-rootfs, autogen-require-ro-rootfs] }
+    - { policyName: require-run-as-nonroot, ruleNames: [require-run-as-nonroot, autogen-require-run-as-nonroot] }
+    - { policyName: restrict-seccomp, ruleNames: [restrict-seccomp, autogen-restrict-seccomp] }
+  match:
+    any:
+      - resources:
+          kinds: [Pod, Job]
+          namespaces: [weysure-prod]
+          names: ["db-grants-v2*"]
