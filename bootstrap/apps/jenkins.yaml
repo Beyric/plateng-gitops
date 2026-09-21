@@ -35,7 +35,11 @@ spec:
             - { name: jenkins-github-app, keyName: private_key }
             - { name: jenkins-platform, keyName: webhook_secret }
             - { name: jenkins-platform, keyName: sonar_token }
+            # Read-only developer logins (Vault secret/platform/jenkins-users).
+            - { name: jenkins-dev-users, keyName: El-Mobizy }
+            - { name: jenkins-dev-users, keyName: innocent98 }
           installPlugins:
+            - matrix-auth            # per-user permissions; default strategy is all-or-nothing
             - kubernetes
             - workflow-aggregator
             - git
@@ -64,6 +68,36 @@ spec:
                 hosts: [jenkins.beyrictech.com]
           JCasC:
             defaultConfig: true
+            # Developers could not see why a build failed - only GitHub's one-line
+            # status - and merged a security change without a green pipeline. They get
+            # personal, read-only logins: browse jobs, read console logs and test
+            # reports. No build, configure, credentials or script console.
+            securityRealm: |-
+              local:
+                allowsSignup: false
+                enableCaptcha: false
+                users:
+                  - id: "${chart-admin-username}"
+                    name: "Jenkins Admin"
+                    password: "${chart-admin-password}"
+                  - id: "El-Mobizy"
+                    name: "El-Mobizy (read-only)"
+                    password: "${jenkins-dev-users-El-Mobizy}"
+                  - id: "innocent98"
+                    name: "innocent98 (read-only)"
+                    password: "${jenkins-dev-users-innocent98}"
+            authorizationStrategy: |-
+              globalMatrix:
+                entries:
+                  - user:
+                      name: "${chart-admin-username}"
+                      permissions: ["Overall/Administer"]
+                  - user:
+                      name: "El-Mobizy"
+                      permissions: ["Overall/Read", "Job/Read", "View/Read"]
+                  - user:
+                      name: "innocent98"
+                      permissions: ["Overall/Read", "Job/Read", "View/Read"]
             configScripts:
               credentials: |
                 credentials:
