@@ -1,4 +1,5 @@
-# Phase 8 (spec D5). Audit first; Enforce for weysure-prod after seven clean days.
+# Phase 8 (spec D5). Enforce in weysure-prod (2026-09-21, after a clean audit: 219 pass,
+# 0 fail across a release, a migration and three one-shot Jobs); Audit everywhere else.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -6,7 +7,6 @@ metadata:
   annotations:
     policies.kyverno.io/description: "Images must use a fixed tag, never :latest or untagged (Finding 11)."
 spec:
-  validationFailureAction: Audit
   background: true
   rules:
     - name: require-image-tag
@@ -15,6 +15,10 @@ spec:
           - resources:
               kinds: [Pod]
       validate:
+        failureAction: Audit
+        failureActionOverrides:
+          - action: Enforce
+            namespaces: [weysure-prod]
         message: "Every image must carry an explicit tag or digest."
         pattern:
           spec:
@@ -26,6 +30,10 @@ spec:
           - resources:
               kinds: [Pod]
       validate:
+        failureAction: Audit
+        failureActionOverrides:
+          - action: Enforce
+            namespaces: [weysure-prod]
         message: "The :latest tag is not allowed."
         pattern:
           spec:
