@@ -36,7 +36,6 @@ spec:
             - { name: jenkins-platform, keyName: webhook_secret }
             - { name: jenkins-platform, keyName: sonar_token }
             # Read-only developer logins (Vault secret/platform/jenkins-users).
-            - { name: jenkins-dev-users, keyName: El-Mobizy }
             - { name: jenkins-dev-users, keyName: innocent98 }
           installPlugins:
             - matrix-auth            # per-user permissions; default strategy is all-or-nothing
@@ -80,9 +79,6 @@ spec:
                   - id: "${chart-admin-username}"
                     name: "Jenkins Admin"
                     password: "${chart-admin-password}"
-                  - id: "El-Mobizy"
-                    name: "El-Mobizy (read-only)"
-                    password: "${jenkins-dev-users-El-Mobizy}"
                   - id: "innocent98"
                     name: "innocent98 (read-only)"
                     password: "${jenkins-dev-users-innocent98}"
@@ -92,9 +88,6 @@ spec:
                   - user:
                       name: "${chart-admin-username}"
                       permissions: ["Overall/Administer"]
-                  - user:
-                      name: "El-Mobizy"
-                      permissions: ["Overall/Read", "Job/Read", "View/Read"]
                   - user:
                       name: "innocent98"
                       permissions: ["Overall/Read", "Job/Read", "View/Read"]
