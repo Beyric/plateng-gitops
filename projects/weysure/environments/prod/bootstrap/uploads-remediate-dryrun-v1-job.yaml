@@ -1,0 +1,94 @@
+# One-shot (ADR-022), DRY RUN: reports which legacy uploads are still publicly
+# delivered; changes nothing and calls no Cloudinary write API. Developer handover
+# 2026-09-21 item 2. Runs the script shipped inside the API image at the promoted
+# SHA, as ServiceAccount `api` (Vault role weysure-api -> app DML credential via an
+# init-only agent), with the API's own config and weysure-app-config (CLOUDINARY_*).
+# Label app.kubernetes.io/name=db-migrate: the api-egress NetworkPolicy then allows
+# RDS, Vault and HTTPS, and no Service selects the pod. Output is JSON on stdout:
+#   kubectl logs -n weysure-prod job/uploads-remediate-dryrun-v1 -c remediate
+# The --apply run is a separate Job in a separate PR, after the developers confirm.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: uploads-remediate-dryrun-v1
+  namespace: weysure-prod
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        beyric.io/job: uploads-remediation
+      annotations:
+        vault.hashicorp.com/agent-inject: 'true'
+        vault.hashicorp.com/role: weysure-api
+        vault.hashicorp.com/agent-inject-secret-env: database/creds/weysure-app
+        vault.hashicorp.com/agent-inject-template-env: '{{- with secret "database/creds/weysure-app" -}}
+
+          DATABASE_URL=postgresql://{{ .Data.username }}:{{ .Data.password }}@weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com:5432/weysure?sslmode=require
+
+          {{- end }}
+
+          '
+        vault.hashicorp.com/agent-limits-mem: 64Mi
+        vault.hashicorp.com/agent-requests-cpu: 20m
+        vault.hashicorp.com/agent-requests-mem: 32Mi
+        vault.hashicorp.com/agent-run-as-same-user: 'true'
+        vault.hashicorp.com/agent-pre-populate-only: 'true'
+    spec:
+      restartPolicy: Never
+      serviceAccountName: api
+      nodeSelector:
+        node-role: workload
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: remediate
+        image: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-api:78a89edc937d
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 1000
+          runAsUser: 1000
+        command:
+        - /bin/bash
+        - -c
+        - 'set -euo pipefail
+
+          set -a; . "$VAULT_ENV_FILE"; set +a
+
+          cd /app
+
+          python scripts/remediate_private_uploads.py
+
+          '
+        env:
+        - name: VAULT_ENV_FILE
+          value: /vault/secrets/env
+        envFrom:
+        - configMapRef:
+            name: api-config
+        - secretRef:
+            name: weysure-app-config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
