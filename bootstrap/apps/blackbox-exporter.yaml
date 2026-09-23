@@ -1,0 +1,65 @@
+# Phase 9: Blackbox exporter - synthetic HTTP probes. Two modules: `external`
+# goes out through Cloudflare like a user (browser User-Agent: the WAF returns
+# 403 to library UAs), `internal` hits the Services directly. Targets are
+# Prometheus Operator `Probe` objects in platform/monitoring.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox-exporter
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "6" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    targetRevision: 11.18.0
+    helm:
+      valuesObject:
+        fullnameOverride: blackbox
+        nodeSelector: { node-role: system }
+        podSecurityContext: { seccompProfile: { type: RuntimeDefault } }
+        resources:
+          requests: { cpu: 10m, memory: 32Mi }
+          limits: { memory: 64Mi }
+        serviceMonitor: { selfMonitor: { enabled: true } }
+        config:
+          modules:
+            external:
+              prober: http
+              timeout: 10s
+              http:
+                method: GET
+                preferred_ip_protocol: ip4
+                follow_redirects: true
+                valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+                valid_status_codes: [200]
+                fail_if_ssl: false
+                fail_if_not_ssl: true
+                headers:
+                  User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 beyric-blackbox"
+                  Accept: "text/html,application/json;q=0.9,*/*;q=0.8"
+            # Grafana sits behind Cloudflare Access: a healthy answer is the 302 to the Access login.
+            external_access_protected:
+              prober: http
+              timeout: 10s
+              http:
+                method: GET
+                preferred_ip_protocol: ip4
+                follow_redirects: false
+                valid_status_codes: [302]
+                fail_if_not_ssl: true
+                headers:
+                  User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36 beyric-blackbox"
+            internal:
+              prober: http
+              timeout: 5s
+              http:
+                method: GET
+                preferred_ip_protocol: ip4
+                valid_status_codes: [200]
+  destination: { server: https://kubernetes.default.svc, namespace: monitoring }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }

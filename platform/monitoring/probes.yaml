@@ -1,0 +1,50 @@
+# Phase 9. Synthetic probes; Prometheus (nil selectors) picks these up. Each
+# probe yields probe_success, probe_duration_seconds, probe_http_status_code
+# and, for TLS targets, probe_ssl_earliest_cert_expiry (the certificate alert).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata: { name: external-sites, namespace: monitoring }
+spec:
+  jobName: blackbox-external
+  interval: 30s
+  scrapeTimeout: 15s
+  prober: { url: blackbox.monitoring.svc:9115 }
+  module: external
+  targets:
+    staticConfig:
+      static:
+        - https://weysure-api.beyrictech.com/api/v1/health
+        - https://weysure.beyrictech.com/
+        - https://jenkins.beyrictech.com/login
+        - https://sonar.beyrictech.com/api/system/status
+      labels: { tier: external }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata: { name: external-access-protected, namespace: monitoring }
+spec:
+  jobName: blackbox-external
+  interval: 60s
+  prober: { url: blackbox.monitoring.svc:9115 }
+  module: external_access_protected
+  targets:
+    staticConfig:
+      static: [https://grafana.beyrictech.com/]
+      labels: { tier: external }
+---
+# Internal: straight to the Services, bypassing Cloudflare, the NLB and Traefik.
+# External down + internal up = edge problem; both down = the app.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata: { name: internal-services, namespace: monitoring }
+spec:
+  jobName: blackbox-internal
+  interval: 30s
+  prober: { url: blackbox.monitoring.svc:9115 }
+  module: internal
+  targets:
+    staticConfig:
+      static:
+        - http://api.weysure-prod.svc/api/v1/health
+        - http://web.weysure-prod.svc/
+      labels: { tier: internal }
