@@ -1,0 +1,170 @@
+# Phase 9 (spec §5). Platform alerts. kube-prometheus-stack already ships the
+# Kubernetes set (KubePodCrashLooping, KubeJobFailed, KubeNodeNotReady,
+# KubePersistentVolumeFillingUp, Watchdog, ...); these add what is specific to
+# this platform, and raise api/web replica loss to critical. Every alert links
+# to its section of runbooks/ALERTS.md. Routing: severity=critical -> the
+# critical Slack channel, everything else -> warning (platform/monitoring/secrets.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: beyric-platform
+  namespace: monitoring
+  labels: { role: alert-rules }
+spec:
+  groups:
+    - name: beyric.availability
+      rules:
+        - alert: SiteDownExternal
+          expr: probe_success{tier="external"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.instance }} is failing from the internet"
+            description: "Blackbox probe through Cloudflare has failed for 2 minutes. If SiteDownInternal is not also firing, the fault is at the edge (Cloudflare, NLB, Traefik, DNS, TLS)."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#sitedownexternal
+        - alert: SiteDownInternal
+          expr: probe_success{tier="internal"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.instance }} is failing inside the cluster"
+            description: "Direct probe to the Service has failed for 2 minutes: the application itself is not answering."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#sitedowninternal
+        - alert: DeploymentReplicasMissing
+          expr: kube_deployment_status_replicas_available{namespace="weysure-prod", deployment=~"api|web"} < kube_deployment_spec_replicas{namespace="weysure-prod", deployment=~"api|web"}
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.deployment }} has fewer ready replicas than desired for 10 minutes"
+            description: "Available {{ $value }}; check pod events, Kyverno denials and the migration Job."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#deploymentreplicasmissing
+        - alert: Traefik5xxRateHigh
+          expr: |
+            sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[5m]))
+              / sum by (service) (rate(traefik_service_requests_total[5m])) > 0.02
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.service }}: more than 2% of requests are 5xx"
+            description: "{{ $value | humanizePercentage }} over 5 minutes."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#traefik5xxratehigh
+        - alert: Traefik5xxRateCritical
+          expr: |
+            sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[5m]))
+              / sum by (service) (rate(traefik_service_requests_total[5m])) > 0.10
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.service }}: more than 10% of requests are 5xx"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#traefik5xxratehigh
+    - name: beyric.tls
+      rules:
+        - alert: TLSCertExpiringSoon
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "TLS certificate for {{ $labels.instance }} expires in {{ $value | printf \"%.0f\" }} days"
+            description: "cert-manager renews at 30 days before expiry; below 14 means renewal is failing (DNS-01, Cloudflare token, rate limit)."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#tlscertexpiringsoon
+        - alert: TLSCertExpiryCritical
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 3
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "TLS certificate for {{ $labels.instance }} expires in under 3 days"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#tlscertexpiringsoon
+        - alert: CertManagerCertificateNotReady
+          expr: certmanager_certificate_ready_status{condition="False"} == 1
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Certificate {{ $labels.name }} in {{ $labels.exported_namespace }} is not Ready"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#tlscertexpiringsoon
+    - name: beyric.vault
+      rules:
+        - alert: VaultSealed
+          expr: vault_core_unsealed == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Vault is sealed"
+            description: "Auto-unseal (KMS) did not run. Every new pod and credential renewal will fail from now on."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#vaultsealed
+        - alert: VaultDown
+          expr: absent(vault_core_unsealed) or up{job="vault-active"} == 0
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Vault is not being scraped"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#vaultsealed
+        - alert: VaultLeaseAnomaly
+          expr: vault_expire_num_leases > 100
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Vault holds {{ $value }} leases - expected a few dozen"
+            description: "Leases are minted per pod and per login. A climbing count means something is logging in in a loop or revocation is failing (Finding 41)."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#vaultleaseanomaly
+    - name: beyric.gitops
+      rules:
+        - alert: ArgoAppDegraded
+          expr: argocd_app_info{health_status=~"Degraded|Missing"} == 1
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Argo CD app {{ $labels.name }} is {{ $labels.health_status }}"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#argoappdegraded
+        - alert: ArgoAppOutOfSync
+          # LBC and root show a cosmetic OutOfSync (webhook cert regenerated on render) - excluded until ignoreDifferences lands.
+          expr: argocd_app_info{sync_status="OutOfSync", name!~"aws-load-balancer-controller|root"} == 1
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Argo CD app {{ $labels.name }} has been OutOfSync for 30 minutes"
+            description: "Auto-sync is on: a lasting OutOfSync means a failed sync or a blocked hook. Also expected while the platform is asleep."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#argoappoutofsync
+        - alert: ExternalSecretNotReady
+          expr: externalsecret_status_condition{condition="Ready", status="True"} == 0
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "ExternalSecret {{ $labels.name }} in {{ $labels.exported_namespace }} is not Ready"
+            description: "ESO cannot read the Vault path: policy, path name, or Vault sealed."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#externalsecretnotready
+    - name: beyric.capacity
+      rules:
+        - alert: KarpenterChurn
+          expr: sum(increase(karpenter_nodeclaims_disrupted_total[1h])) > 6
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Karpenter disrupted {{ $value | printf \"%.0f\" }} nodes in the last hour"
+            description: "Consolidation or drift is churning workload nodes; every disruption restarts the app pods."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#karpenterchurn
+        - alert: NoWorkloadNode
+          expr: sum(kube_node_status_condition{condition="Ready", status="true"} * on(node) group_left kube_node_labels{label_node_role="workload"}) == 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "No Ready workload node for 10 minutes"
+            description: "Expected while the platform is asleep. Otherwise Karpenter cannot provision: check its logs, the NodePool limits and spot capacity."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#noworkloadnode
+    - name: beyric.lifecycle
+      rules:
+        - alert: EKSEndOfStandardSupportApproaching
+          # Fires from 2027-06-03, 60 days before Kubernetes 1.36 leaves standard support (2027-08-02).
+          expr: (time() > bool 1811980800) == 1
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "EKS 1.36 leaves standard support on 2027-08-02 - plan the upgrade"
+            description: "After that date the control plane bills at 6x (Phase 8 lesson: $365/month). Follow runbooks/EKS_UPGRADE.md."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#eksendofstandardsupportapproaching
+        - alert: MonitoringStackDegraded
+          expr: up{job=~"kps-alertmanager|kps-prometheus|kube-prometheus-stack-grafana|blackbox"} == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.job }} is down"
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#monitoringstackdegraded
