@@ -20,9 +20,18 @@ spec:
         fullnameOverride: alloy
         controller:
           type: daemonset
+          volumes:
+            extra:
+              - { name: alloy-storage, emptyDir: {} }
           tolerations:
             - { operator: Exists }        # every node, including any tainted one
         alloy:
+          # Alloy keeps its WAL/positions under storagePath; the rootfs is read-only,
+          # so that path is an emptyDir (Phase 7 lesson: every writable path explicit).
+          storagePath: /tmp/alloy
+          mounts:
+            extra:
+              - { name: alloy-storage, mountPath: /tmp/alloy }
           securityContext:
             runAsNonRoot: true
             runAsUser: 473
