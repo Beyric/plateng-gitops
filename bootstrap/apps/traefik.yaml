@@ -37,6 +37,11 @@ spec:
         # top-level logs values. Everything below is expressed as Traefik's own
         # CLI flags instead, which have been stable for years and are not
         # subject to the chart's values schema changing under us again.
+        # Phase 9: scraped by Prometheus (monitoring namespace, nil selectors pick up every ServiceMonitor).
+        metrics:
+          prometheus:
+            service: { enabled: true }
+            serviceMonitor: { enabled: true, interval: 30s }
         additionalArguments:
           # Plain HTTP is only ever a redirect - everything arrives over HTTPS
           # through Cloudflare.

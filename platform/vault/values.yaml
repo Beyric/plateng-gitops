@@ -93,6 +93,16 @@ server:
           address     = "[::]:8200"
           cluster_address = "[::]:8201"
           tls_disable = 1   # Phase 4 terminates TLS at Traefik; in-cluster is mTLS later
+          # Phase 9: /v1/sys/metrics without a token, for Prometheus only. Metrics
+          # carry no secret material; the endpoint is reachable in-cluster only.
+          telemetry {
+            unauthenticated_metrics_access = "true"
+          }
+        }
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname          = true
         }
 
         storage "raft" {
@@ -108,4 +118,10 @@ server:
 
 ui:
   enabled: true
+
+# Phase 9: scraped by Prometheus (monitoring namespace, nil selectors pick up every ServiceMonitor).
+serverTelemetry:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
   serviceType: ClusterIP

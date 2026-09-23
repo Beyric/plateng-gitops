@@ -17,22 +17,27 @@ global:
   nodeSelector:
     node-role: system
 
+# Phase 9: scraped by Prometheus (monitoring namespace, nil selectors pick up every ServiceMonitor).
 controller:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources:
     requests: { cpu: 250m, memory: 512Mi }
     limits:   { memory: 1Gi }
 
 repoServer:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { memory: 512Mi }
 
 server:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits:   { memory: 256Mi }
 
 applicationSet:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits:   { memory: 256Mi }
@@ -44,6 +49,7 @@ notifications:
   enabled: false
 
 redis:
+  metrics: { enabled: true, serviceMonitor: { enabled: true } }
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits:   { memory: 128Mi }
