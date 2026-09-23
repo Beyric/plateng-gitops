@@ -143,7 +143,7 @@ spec:
             description: "Consolidation or drift is churning workload nodes; every disruption restarts the app pods."
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#karpenterchurn
         - alert: NoWorkloadNode
-          expr: sum(kube_node_status_condition{condition="Ready", status="true"} * on(node) group_left kube_node_labels{label_node_role="workload"}) == 0
+          expr: (karpenter_nodepools_usage{resource_type="nodes", nodepool="default"} or vector(0)) == 0
           for: 10m
           labels: { severity: warning }
           annotations:
@@ -154,7 +154,7 @@ spec:
       rules:
         - alert: EKSEndOfStandardSupportApproaching
           # Fires from 2027-06-03, 60 days before Kubernetes 1.36 leaves standard support (2027-08-02).
-          expr: (time() > bool 1811980800) == 1
+          expr: vector(time()) > 1811980800
           for: 1h
           labels: { severity: warning }
           annotations:
