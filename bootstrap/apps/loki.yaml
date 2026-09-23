@@ -1,0 +1,80 @@
+# Phase 9 (spec D1/D3): Loki single-binary on the system nodes, chunks and index
+# in S3 (bucket + pod identity from Terraform, infra #31), 7-day retention via
+# the compactor (the bucket's 14-day lifecycle is the backstop). No gateway,
+# no memcached, no canary: Grafana talks to loki:3100 directly.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "6" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 7.3.0
+    helm:
+      valuesObject:
+        fullnameOverride: loki
+        deploymentMode: SingleBinary
+        serviceAccount:
+          create: true
+          name: loki                      # EKS pod identity association (infra lbc/observability.tf)
+        loki:
+          auth_enabled: false
+          commonConfig: { replication_factor: 1 }
+          storage:
+            type: s3
+            bucketNames:
+              chunks: beyric-loki-767397877316
+              ruler: beyric-loki-767397877316
+              admin: beyric-loki-767397877316
+            s3: { region: us-east-1 }
+          schemaConfig:
+            configs:
+              - from: "2026-09-01"
+                store: tsdb
+                object_store: s3
+                schema: v13
+                index: { prefix: loki_index_, period: 24h }
+          limits_config:
+            retention_period: 168h        # 7 d (spec D3); raise here when retention changes
+            reject_old_samples: true
+            reject_old_samples_max_age: 168h
+            ingestion_rate_mb: 8
+            ingestion_burst_size_mb: 16
+          compactor:
+            retention_enabled: true
+            delete_request_store: s3
+            working_directory: /var/loki/compactor
+            compaction_interval: 10m
+            retention_delete_delay: 2h
+          storage_config:
+            tsdb_shipper:
+              active_index_directory: /var/loki/index
+              cache_location: /var/loki/index_cache
+        singleBinary:
+          replicas: 1
+          nodeSelector: { node-role: system }
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
+          persistence: { enabled: true, size: 5Gi, storageClass: gp3 }
+        write: { replicas: 0 }
+        read: { replicas: 0 }
+        backend: { replicas: 0 }
+        gateway: { enabled: false }
+        chunksCache: { enabled: false }
+        resultsCache: { enabled: false }
+        lokiCanary: { enabled: false }
+        test: { enabled: false }
+        minio: { enabled: false }
+        monitoring:
+          serviceMonitor: { enabled: true }
+  destination: { server: https://kubernetes.default.svc, namespace: monitoring }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [ServerSideApply=true]
+    retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }
