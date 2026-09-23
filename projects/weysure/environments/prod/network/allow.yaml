@@ -97,3 +97,18 @@ spec:
       ports: [{ protocol: TCP, port: 443 }]
     - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]
       ports: [{ protocol: TCP, port: 80 }]
+---
+# Phase 9: the monitoring namespace may reach api and web (Blackbox internal
+# probes; app /metrics when the developers add one).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-monitoring-ingress, namespace: weysure-prod }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, web] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+      ports: [{ protocol: TCP, port: 8000 }, { protocol: TCP, port: 3000 }]
