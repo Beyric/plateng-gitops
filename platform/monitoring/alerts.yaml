@@ -143,7 +143,8 @@ spec:
             description: "Consolidation or drift is churning workload nodes; every disruption restarts the app pods."
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#karpenterchurn
         - alert: NoWorkloadNode
-          expr: (karpenter_nodepools_usage{resource_type="nodes", nodepool="default"} or vector(0)) == 0
+          # `or vector(0)` would ALWAYS add a 0 series (Finding: fired non-stop after #43). absent() is the right shape.
+          expr: absent(karpenter_nodepools_usage{resource_type="nodes", nodepool="default"}) or (karpenter_nodepools_usage{resource_type="nodes", nodepool="default"} == 0)
           for: 10m
           labels: { severity: warning }
           annotations:
