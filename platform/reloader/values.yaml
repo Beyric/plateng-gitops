@@ -10,6 +10,8 @@
 # workload asked for.
 
 reloader:
+  # Phase 9
+  serviceMonitor: { enabled: true }
   watchGlobally: true
   reloadStrategy: annotations
   ignoreSecrets: false

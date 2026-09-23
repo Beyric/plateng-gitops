@@ -21,6 +21,7 @@ spec:
         region: us-east-1
         vpcId: vpc-0f31b251bbfab9764
         replicaCount: 2
+        serviceMonitor: { enabled: true, interval: 30s }   # Phase 9
         nodeSelector: { node-role: system }
         serviceAccount:
           create: true

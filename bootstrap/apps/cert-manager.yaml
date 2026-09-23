@@ -14,6 +14,7 @@ spec:
     helm:
       valuesObject:
         crds: { enabled: true }
+        prometheus: { enabled: true, servicemonitor: { enabled: true } }   # Phase 9
         # Cloudflare's public resolvers, not the cluster's. CoreDNS may answer
         # from a split-horizon view and report the TXT record as missing, which
         # stalls the ACME challenge until it times out.

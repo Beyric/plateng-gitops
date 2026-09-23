@@ -24,14 +24,15 @@ spec:
         features:
           policyExceptions: { enabled: true, namespace: weysure-prod }
         admissionController:
+          serviceMonitor: { enabled: true }   # Phase 9
           replicas: 2
           nodeSelector: { node-role: system }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { memory: 512Mi }
-        backgroundController: { nodeSelector: { node-role: system } }
-        cleanupController: { nodeSelector: { node-role: system } }
-        reportsController: { nodeSelector: { node-role: system } }
+        backgroundController: { nodeSelector: { node-role: system }, serviceMonitor: { enabled: true } }
+        cleanupController: { nodeSelector: { node-role: system }, serviceMonitor: { enabled: true } }
+        reportsController: { nodeSelector: { node-role: system }, serviceMonitor: { enabled: true } }
         # Never block the platform's own namespaces on a webhook outage.
         config:
           preserve: false   # Kyverno platform notes for Argo CD

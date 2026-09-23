@@ -25,6 +25,7 @@ spec:
           create: true
           name: karpenter
         replicas: 1
+        serviceMonitor: { enabled: true }   # Phase 9
         controller:
           resources:
             requests: { cpu: 200m, memory: 256Mi }
