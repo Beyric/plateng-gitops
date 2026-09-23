@@ -1,0 +1,84 @@
+# Phase 9 (spec D1/D3): Prometheus, Alertmanager, Grafana and the Prometheus
+# Operator on the system nodes. 7-day retention on 15 GB gp3 (expandable online).
+# Alertmanager's config is rendered by ESO from Vault (platform/monitoring).
+# Grafana has no Ingress yet: it arrives with Cloudflare Access + JWT validation.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+    argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 91.4.1
+    helm:
+      valuesObject:
+        fullnameOverride: kps
+        # EKS does not expose these control-plane components; the rules would only fire.
+        kubeEtcd: { enabled: false }
+        kubeScheduler: { enabled: false }
+        kubeControllerManager: { enabled: false }
+        kubeProxy: { enabled: false }
+        defaultRules:
+          create: true
+          rules: { etcd: false, kubeScheduler: false, kubeControllerManager: false, kubeProxy: false }
+        prometheusOperator:
+          nodeSelector: { node-role: system }
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+          # Its admission webhook listens on 10250 by default - one of the ports the
+          # control plane can reach (Finding 31); failurePolicy is Ignore.
+        prometheus:
+          prometheusSpec:
+            retention: 7d
+            retentionSize: 13GB           # below the 15 GB volume so it never fills
+            nodeSelector: { node-role: system }
+            resources: { requests: { cpu: 200m, memory: 768Mi }, limits: { memory: 1536Mi } }
+            # Pick up every ServiceMonitor/PodMonitor/Probe/Rule in the cluster, not only the chart's.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: [ReadWriteOnce]
+                  resources: { requests: { storage: 15Gi } }
+            externalLabels: { cluster: beyric-prod }
+        alertmanager:
+          alertmanagerSpec:
+            configSecret: alertmanager-config   # rendered by ESO: platform/monitoring/secrets.yaml
+            nodeSelector: { node-role: system }
+            resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: [ReadWriteOnce]
+                  resources: { requests: { storage: 1Gi } }
+        grafana:
+          admin: { existingSecret: grafana-admin, userKey: admin-user, passwordKey: admin-password }
+          nodeSelector: { node-role: system }
+          resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 384Mi } }
+          persistence: { enabled: true, storageClassName: gp3, size: 2Gi }
+          defaultDashboardsTimezone: Africa/Lagos
+          grafana.ini:
+            server: { root_url: https://grafana.beyrictech.com }
+            users: { allow_sign_up: false }
+            analytics: { reporting_enabled: false, check_for_updates: false }
+        kube-state-metrics:
+          nodeSelector: { node-role: system }
+          resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
+        prometheus-node-exporter:
+          resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 64Mi } }
+  destination: { server: https://kubernetes.default.svc, namespace: monitoring }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [ServerSideApply=true]
+    retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }
