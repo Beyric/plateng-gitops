@@ -68,10 +68,32 @@ spec:
           resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 384Mi } }
           persistence: { enabled: true, storageClassName: gp3, size: 2Gi }
           defaultDashboardsTimezone: Africa/Lagos
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            annotations: { cert-manager.io/cluster-issuer: letsencrypt-prod }
+            hosts: [grafana.beyrictech.com]
+            tls: [{ secretName: grafana-tls, hosts: [grafana.beyrictech.com] }]
           grafana.ini:
             server: { root_url: https://grafana.beyrictech.com }
-            users: { allow_sign_up: false }
             analytics: { reporting_enabled: false, check_for_updates: false }
+            # Cloudflare Access (spec D4) is the only door. Access signs a JWT for
+            # every request it lets through; Grafana accepts nothing else. A request
+            # that reaches the public NLB directly carries no JWT and gets 401 -
+            # the edge cannot be bypassed with a Host header. Roles by email.
+            auth: { disable_login_form: true, disable_signout_menu: true }
+            auth.jwt:
+              enabled: true
+              header_name: Cf-Access-Jwt-Assertion
+              jwk_set_url: https://beyric.cloudflareaccess.com/cdn-cgi/access/certs
+              expect_claims: '{"iss": "https://beyric.cloudflareaccess.com", "aud": "1d44796c6c61db1553ab84cb1fe79d35c259015c43f51a2be10ec047ef4c745b"}'
+              email_claim: email
+              username_claim: email
+              auto_sign_up: true
+              role_attribute_path: "email == 'beyrichq@gmail.com' && 'Admin' || 'Viewer'"
+              role_attribute_strict: true
+              cache_ttl: 10m
+            users: { allow_sign_up: false, auto_assign_org_role: Viewer }
         kube-state-metrics:
           nodeSelector: { node-role: system }
           resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
