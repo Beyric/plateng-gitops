@@ -98,6 +98,17 @@ spec:
           annotations:
             summary: "Vault is not being scraped"
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#vaultsealed
+        - alert: VaultSnapshotMissing
+          # No "or vector(0)": absent() covers "never succeeded" without always firing.
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{namespace="vault", cronjob="vault-snapshot"}) > 26 * 3600
+            or absent(kube_cronjob_status_last_successful_time{namespace="vault", cronjob="vault-snapshot"})
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "No successful Vault snapshot in the last 26 hours"
+            description: "The daily Raft snapshot CronJob (vault/vault-snapshot, 02:00 UTC) has not succeeded. If the Vault volume is lost now, the newest restorable copy is older than a day."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#vaultsnapshotmissing
         - alert: VaultLeaseAnomaly
           expr: vault_expire_num_leases > 100
           for: 15m
