@@ -1,0 +1,12 @@
+# Phase 10 (spec D2). Kustomize only for the ConfigMap generator: the ConfigMap's
+# name carries a hash of verify.py and audiences.json, so changing either one
+# rolls the Deployment by itself. tests/ is not part of what is deployed.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - verifier.yaml
+  - middlewares.yaml
+configMapGenerator:
+  - name: access-verify
+    namespace: edge-auth
+    files: [verify.py, audiences.json]

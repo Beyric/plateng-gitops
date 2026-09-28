@@ -1,0 +1,123 @@
+# Phase 10 (spec D2): the origin checks what the edge promised.
+#
+# Cloudflare Access protects a DNS name. The load balancer has a public address
+# of its own: a request sent straight to it with "Host: sonar.beyrictech.com"
+# never meets Access. Traefik therefore asks this service (forwardAuth) before it
+# forwards anything to a protected host, and the service accepts only a token
+# signed by our Access team, for that host's Access application, not expired.
+#
+# If this service is down, Traefik refuses every request to the protected hosts
+# (fail closed). Customer traffic (weysure, weysure-api) does not pass through it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edge-auth
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: access-verify
+  namespace: edge-auth
+  labels: { app.kubernetes.io/name: access-verify }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: access-verify }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: access-verify }
+    spec:
+      automountServiceAccountToken: false      # it never talks to the Kubernetes API
+      nodeSelector: { node-role: system }      # beside Traefik; not on a node that can vanish
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: access-verify }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: verify
+          # Official image, pinned by digest: the tag is for people, the digest is what runs.
+          image: python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f
+          command: ["python", "/app/verify.py"]
+          env:
+            - { name: ACCESS_TEAM_DOMAIN, value: "https://beyric.cloudflareaccess.com" }
+            - { name: AUDIENCES_FILE, value: /app/audiences.json }
+            - { name: PORT, value: "8080" }
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
+            - { name: PYTHONUNBUFFERED, value: "1" }
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }     # ready = signing keys loaded
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }       # measured idle: 14 Mi
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: app, mountPath: /app, readOnly: true }
+      volumes:
+        - name: app
+          configMap: { name: access-verify }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: access-verify
+  namespace: edge-auth
+  labels: { app.kubernetes.io/name: access-verify }
+spec:
+  selector: { app.kubernetes.io/name: access-verify }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: access-verify
+  namespace: edge-auth
+spec:
+  minAvailable: 1
+  # Finding 45: a pod that is already not Ready may always be evicted, so a broken
+  # node can be drained without --disable-eviction.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels: { app.kubernetes.io/name: access-verify }
+---
+# Only Traefik may ask. Out: DNS, and HTTPS for Cloudflare's signing keys.
+# Kubelet probes are not subject to NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: access-verify
+  namespace: edge-auth
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: access-verify } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
+      ports: [{ protocol: TCP, port: 8080 }]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/16] } }]
+      ports: [{ protocol: TCP, port: 443 }]

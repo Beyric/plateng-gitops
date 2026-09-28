@@ -1,0 +1,7 @@
+{
+  "sonar.beyrictech.com": "f94d7fdff86be167b0dae4e6f66235496419b822c01f3a2ad371a8dc95651e29",
+  "jenkins.beyrictech.com": "884e203672e908b0c7b415c32b861416613348dfcd5af8780a6e53d1d477cd57",
+  "prometheus.beyrictech.com": "61bfa4d7f0cabd51d1799512e388db4e072aa3853ad1218ad4a5e7c7f0a94048",
+  "alertmanager.beyrictech.com": "d34a5d563e7a378328aedda7c15c97cab55dfd7b9d70feb37a3de353617a18a3",
+  "argocd.beyrictech.com": "8c2713235198c7b4b9ec29ccebc37485b3d8af082cd8f6e79c39a5efee8cb676"
+}
