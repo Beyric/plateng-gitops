@@ -32,6 +32,13 @@ spec:
           requests: { cpu: 50m, memory: 128Mi }
           limits: { memory: 256Mi }
   destination: { server: https://kubernetes.default.svc, namespace: kube-system }
+  # The chart generates a fresh self-signed webhook certificate on every render,
+  # so the Secret and both webhook caBundles never match git. Cosmetic: ignored.
+  ignoreDifferences:
+    - { kind: Secret, name: aws-load-balancer-tls, jsonPointers: [/data] }
+    - { group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration, name: aws-load-balancer-webhook, jqPathExpressions: ['.webhooks[].clientConfig.caBundle'] }
+    - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration, name: aws-load-balancer-webhook, jqPathExpressions: ['.webhooks[].clientConfig.caBundle'] }
   syncPolicy:
     automated: { prune: true, selfHeal: false }
+    syncOptions: [RespectIgnoreDifferences=true]
     retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }

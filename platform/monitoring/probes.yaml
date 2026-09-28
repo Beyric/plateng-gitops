@@ -15,8 +15,6 @@ spec:
       static:
         - https://weysure-api.beyrictech.com/api/v1/health
         - https://weysure.beyrictech.com/
-        - https://jenkins.beyrictech.com/login
-        - https://sonar.beyrictech.com/api/system/status
       labels: { tier: external }
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -29,7 +27,10 @@ spec:
   module: external_access_protected
   targets:
     staticConfig:
-      static: [https://grafana.beyrictech.com/]
+      static:
+        - https://grafana.beyrictech.com/
+        - https://jenkins.beyrictech.com/login
+        - https://sonar.beyrictech.com/
       labels: { tier: external }
 ---
 # Internal: straight to the Services, bypassing Cloudflare, the NLB and Traefik.
