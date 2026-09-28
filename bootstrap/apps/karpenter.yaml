@@ -25,7 +25,14 @@ spec:
           create: true
           name: karpenter
         replicas: 1
-        serviceMonitor: { enabled: true }   # Phase 9
+        serviceMonitor:
+          enabled: true
+          # Finding 43: the instance-type offering tables were 22% of all Prometheus
+          # series and answer no question we ask. Dropped at scrape time.
+          metricRelabelings:
+            - sourceLabels: [__name__]
+              regex: karpenter_cloudprovider_instance_type_offering_.*
+              action: drop
         controller:
           resources:
             requests: { cpu: 200m, memory: 256Mi }

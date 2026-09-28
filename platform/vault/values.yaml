@@ -35,6 +35,14 @@ injector:
     memLimit: 64Mi
 
 server:
+  # The chart defaults to OnDelete, so a config change never restarts the pod
+  # (Finding 26: twice). With one replica and KMS auto-unseal a rolling restart
+  # is safe (~1 min); Reloader triggers it when the config ConfigMap changes.
+  # Revisit at three replicas (ADR-007).
+  updateStrategyType: RollingUpdate
+  statefulSet:
+    annotations:
+      configmap.reloader.stakater.com/reload: vault-config
   # Pinned so an Argo CD sync cannot silently move Vault's version.
   image:
     repository: hashicorp/vault
