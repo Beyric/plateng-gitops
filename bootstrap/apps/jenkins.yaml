@@ -21,8 +21,13 @@ spec:
           numExecutors: 0
           # Controller is stateful and must not be reclaimed: on-demand system node.
           nodeSelector: { node-role: system }
+          # CPU request measured, not guessed: over six days the controller used 3m at
+          # the 95th percentile and 7m at its peak (builds run in agent pods, not here).
+          # 500m reserved a quarter of a system node and left no room to schedule
+          # anything else on it. A request is a reservation, not a limit: the
+          # controller can still use more when the node has it.
           resources:
-            requests: { cpu: 500m, memory: 1536Mi }
+            requests: { cpu: 150m, memory: 1536Mi }
             limits: { memory: 2560Mi }
           admin:
             existingSecret: jenkins-platform
