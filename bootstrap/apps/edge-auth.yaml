@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: edge-auth
+  namespace: argocd
+  # Wave 5: the Middleware kind comes with Traefik's CRDs (wave 4).
+  annotations: { argocd.argoproj.io/sync-wave: "5" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: platform/edge-auth          # kustomization.yaml - Argo CD detects it
+  destination: { server: https://kubernetes.default.svc, namespace: edge-auth }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    retry: { limit: 5, backoff: { duration: 15s, factor: 2, maxDuration: 3m } }

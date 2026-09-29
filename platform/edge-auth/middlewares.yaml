@@ -1,0 +1,44 @@
+# One Middleware per namespace that has a protected Ingress (Traefik runs with
+# allowCrossNamespace: false). Inert until an Ingress names it:
+#   traefik.ingress.kubernetes.io/router.middlewares: <namespace>-access-verify@kubernetescrd
+# Only the Access token is sent to the verifier - no cookies, no Authorization header.
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: access-verify
+  namespace: sonarqube
+spec:
+  forwardAuth:
+    address: http://access-verify.edge-auth.svc.cluster.local:8080/verify
+    authRequestHeaders: [Cf-Access-Jwt-Assertion]
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: access-verify
+  namespace: jenkins
+spec:
+  forwardAuth:
+    address: http://access-verify.edge-auth.svc.cluster.local:8080/verify
+    authRequestHeaders: [Cf-Access-Jwt-Assertion]
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: access-verify
+  namespace: monitoring
+spec:
+  forwardAuth:
+    address: http://access-verify.edge-auth.svc.cluster.local:8080/verify
+    authRequestHeaders: [Cf-Access-Jwt-Assertion]
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: access-verify
+  namespace: argocd
+spec:
+  forwardAuth:
+    address: http://access-verify.edge-auth.svc.cluster.local:8080/verify
+    authRequestHeaders: [Cf-Access-Jwt-Assertion]
