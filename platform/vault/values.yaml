@@ -59,6 +59,15 @@ server:
   nodeSelector:
     node-role: system
 
+  # Vault's volumes are zonal (us-east-1b): it can run on exactly one of the two
+  # system nodes. On the first wake from sleep (2026-10-01) that node came up
+  # first, the scheduler packed 36 pods onto it, and Vault - which everything
+  # else is waiting for - had no CPU left to be scheduled into. With a priority
+  # class the scheduler evicts lower-priority pods to make room; they have no
+  # zone constraint and simply start on the other node. Built-in class, so there
+  # is nothing to create first.
+  priorityClassName: system-cluster-critical
+
   dataStorage:
     enabled: true
     size: 8Gi
