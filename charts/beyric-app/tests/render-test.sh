@@ -38,7 +38,11 @@ job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadat
 check(job['metadata']['annotations']['argocd.argoproj.io/hook']=='PreSync' and 'HookSucceeded' in job['metadata']['annotations']['argocd.argoproj.io/hook-delete-policy'], 'migration job is a PreSync hook')
 check(ja.get('vault.hashicorp.com/agent-pre-populate-only')=='true' and ja.get('vault.hashicorp.com/role')=='weysure-migrate', 'migration uses init-only agent with migrate role')
 sa=one(api,'ServiceAccount','db-migrate')['metadata']['annotations']; check(sa.get('argocd.argoproj.io/hook')=='PreSync' and sa.get('argocd.argoproj.io/sync-wave')=='-1', 'migration SA is a PreSync hook before the Job')
-jenv={e['name']:e.get('value') for e in job['spec']['template']['spec']['containers'][0]['env']}; check(jenv.get('SERVER_HOST','').startswith('https://') and 'VAULT_ENV_FILE' in jenv, 'migration job has SERVER_HOST + VAULT_ENV_FILE env')
+jc=job['spec']['template']['spec']['containers'][0]; jenv={e['name']:e.get('value') for e in jc['env']}; check(list(jenv)==['VAULT_ENV_FILE'], 'migration job env is VAULT_ENV_FILE only')
+check('envFrom' not in jc, 'migration job mounts no application secret (no SECRET_KEY)')
+for n in ('api','api-scheduler'):
+    pc=one(api,'Deployment',n)['spec']['template']['spec']; mounts=sorted(m['mountPath'] for m in pc['containers'][0].get('volumeMounts',[]) if not m['mountPath'].startswith('/vault'))
+    check(mounts==['/tmp'], f'{n}: /tmp is the only writable path, got {mounts}')
 check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)')
 check(job['spec']['backoffLimit']==0 and job['spec']['template']['spec']['serviceAccountName']=='db-migrate', 'migration job SA + no retries')
 es=one(api,'ExternalSecret','weysure-app-config'); check(es['metadata']['annotations'].get('argocd.argoproj.io/hook')=='PreSync' and es['metadata']['annotations'].get('argocd.argoproj.io/sync-wave')=='-2', 'ExternalSecret is a PreSync hook before the migration Job'); check(es['spec']['dataFrom'][0]['extract']['key']=='weysure/prod' and es['spec']['secretStoreRef']['name']=='vault', 'ExternalSecret from weysure/prod')
