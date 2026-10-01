@@ -22,9 +22,10 @@ migration:
   vaultRole: weysure-migrate
   dbCredsPath: database/creds/weysure-migrate
   command: ["/bin/bash", "-c", "set -a; . \"$VAULT_ENV_FILE\"; set +a; cd /app && alembic upgrade head"]
-  env:
-    ENVIRONMENT: production
-    SERVER_HOST: https://weysure-api.beyrictech.com   # Settings() validates it as a URL even for alembic
+  # Nothing but DATABASE_URL (from the Vault file above). Since Weysure-API #12
+  # alembic no longer imports the application's Settings, so the Job carries no
+  # SECRET_KEY and no app config. Proven 2026-10-01 on the deployed commit:
+  # 49 migrations from an empty database with DATABASE_URL as the only variable.
 
 # Non-secret configuration shared by both API workloads.
 commonEnv: &commonEnv
@@ -51,12 +52,9 @@ components:
     hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     pdb: { enabled: true, minAvailable: 1 }
     terminationGracePeriodSeconds: 60
-    # The only filesystem writes in the code base (grep'd): loguru's file sink
-    # under /app/logs and KYC uploads under /app/uploads, both at import time.
-    # emptyDirs let the pod boot. /app/uploads is per-pod and ephemeral - KYC
-    # documents do not survive a restart and are not shared between replicas.
-    # Developer follow-up (high): store uploads in S3/Cloudinary, not on disk.
-    writableDirs: [/tmp, /app/logs, /app/uploads]
+    # The application writes nothing to disk (Weysure-API #14: logs to stdout;
+    # #16: uploads to Cloudinary), so /tmp is the only writable path left.
+    writableDirs: [/tmp]
   api-scheduler:
     replicas: 1
     vaultAgent: true
@@ -72,4 +70,4 @@ components:
     port: 8000
     service: { enabled: false }
     probes: { path: /api/v1/health }
-    writableDirs: [/tmp, /app/logs, /app/uploads]
+    writableDirs: [/tmp]

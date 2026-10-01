@@ -35,9 +35,10 @@ spec:
             {{- range $k, $v := $m.env }}
             - { name: {{ $k }}, value: {{ $v | toString | quote }} }
             {{- end }}
-          {{- if .Values.envFromSecrets }}
+          {{- /* Not .Values.envFromSecrets: a migration gets only the secrets it lists itself. */}}
+          {{- if $m.envFromSecrets }}
           envFrom:
-            {{- range .Values.envFromSecrets }}
+            {{- range $m.envFromSecrets }}
             - secretRef: { name: {{ . }} }
             {{- end }}
           {{- end }}

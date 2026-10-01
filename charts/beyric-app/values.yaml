@@ -74,6 +74,10 @@ migration:
   # Plain env for the Job. It cannot use the components' ConfigMaps: those are
   # ordinary resources and do not exist yet when PreSync hooks run.
   env: {}
+  # Secrets for the Job, separate from the workloads' envFromSecrets (least
+  # privilege): a schema migration has no business holding the application's
+  # signing key. Empty by default - the database URL comes from Vault.
+  envFromSecrets: []
   activeDeadlineSeconds: 600
   resources:
     requests: { cpu: 100m, memory: 256Mi }
