@@ -35,6 +35,13 @@ spec:
           hosts: [{ name: sonar.beyrictech.com }]
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
+            # Phase 10 (spec D2): the origin checks what the edge promised. Before a
+            # request reaches SonarQube, Traefik asks edge-auth/access-verify whether
+            # it carries a token signed by our Cloudflare Access team for this host.
+            # A request sent straight to the load balancer has none and gets 401.
+            # In-cluster callers (Jenkins -> sonarqube-sonarqube.sonarqube.svc) do not
+            # pass through Traefik and are unaffected. Format: <namespace>-<name>@kubernetescrd.
+            traefik.ingress.kubernetes.io/router.middlewares: sonarqube-access-verify@kubernetescrd
           tls: [{ secretName: sonar-tls, hosts: [sonar.beyrictech.com] }]
         persistence: { enabled: true, storageClass: gp3, size: 10Gi }
         resources:

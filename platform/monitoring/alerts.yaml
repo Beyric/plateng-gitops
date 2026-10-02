@@ -57,6 +57,20 @@ spec:
           annotations:
             summary: "{{ $labels.service }}: more than 10% of requests are 5xx"
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#traefik5xxratehigh
+    - name: beyric.edge
+      rules:
+        - alert: EdgeAuthDown
+          # The external probes cannot see this: Cloudflare answers them with the
+          # Access login (302) before the origin is reached.
+          expr: |
+            kube_deployment_status_replicas_available{namespace="edge-auth", deployment="access-verify"} < 1
+            or absent(kube_deployment_status_replicas_available{namespace="edge-auth", deployment="access-verify"})
+          for: 2m
+          labels: { severity: warning }
+          annotations:
+            summary: "The Access token verifier has no ready pod"
+            description: "Traefik fails closed: every request to a host protected by the access-verify middleware (SonarQube) is refused, even for logged-in users. The application (weysure, weysure-api) is not affected."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#edgeauthdown
     - name: beyric.tls
       rules:
         - alert: TLSCertExpiringSoon
