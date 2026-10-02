@@ -42,8 +42,9 @@ commonEnv: &commonEnv
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
   TERMII_BASE_URL: https://v4.api.termii.com/      # this account's host, from the Termii dashboard
-  TERMII_SENDER_ID: N-ALERT
+  TERMII_SENDER_ID: N-Alert                        # exact case: Termii matches the registered sender ID
   TERMII_OTP_CHANNEL: dnd
+  # "Luran" is the brand the SMS route is registered under for now (Adebayo, 2026-10-02).
   # Must stay character-for-character the template Termii approved for the DND
   # route, or messages are rejected. {code} is required; {minutes} is filled from
   # OTP_EXPIRE_MINUTES - which must therefore stay 10 while the approved text says so.
@@ -54,7 +55,9 @@ commonEnv: &commonEnv
 
   # --- KYC phase 3: identity verification (Dojah) ------------------------------
   # Account identifiers and the PUBLIC key: not secret. DOJAH_API_KEY,
-  # DOJAH_WEBHOOK_SECRET and KYC_FINGERPRINT_KEY are in Vault.
+  # DOJAH_WEBHOOK_SECRET and KYC_FINGERPRINT_KEY are in Vault. In Vault the
+  # webhook secret equals the API key: confirmed correct for Dojah (2026-10-02),
+  # not a paste mistake.
   # SANDBOX on purpose (2026-10-02): no real users yet; production checks hit real
   # BVN/NIN records and are billed per check. At launch change DOJAH_ENVIRONMENT to
   # production, DOJAH_BASE_URL to https://api.dojah.io, the public key to the live
