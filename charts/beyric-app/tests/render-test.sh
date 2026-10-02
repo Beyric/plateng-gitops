@@ -32,6 +32,12 @@ check(c['readinessProbe']['httpGet']['path']=='/api/v1/health' and c['startupPro
 check({'configMapRef': {'name': 'api-config'}} in c['envFrom'] and {'secretRef': {'name': 'weysure-app-config'}} in c['envFrom'], 'api envFrom configmap + secret')
 cm=one(api,'ConfigMap','api-config')['data']; check(cm['RUN_MIGRATIONS']=='false' and cm['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='false', 'api config: no migrations, no scheduler')
 sch=one(api,'ConfigMap','api-scheduler-config')['data']; check(sch['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='true' and sch['REDIS_URL']==cm['REDIS_URL'], 'scheduler config inherits common env, enables scheduler')
+kyc=['TERMII_BASE_URL','TERMII_SENDER_ID','TERMII_OTP_CHANNEL','TERMII_OTP_TEMPLATE','OTP_EXPIRE_MINUTES','OTP_RESEND_COOLDOWN_SECONDS','OTP_RESEND_DAILY_CAP','DOJAH_ENVIRONMENT','DOJAH_BASE_URL','DOJAH_APP_ID','DOJAH_PUBLIC_KEY','DOJAH_BVN_WIDGET_ID','DOJAH_NIN_WIDGET_ID','DOJAH_FACE_MATCH_THRESHOLD']
+for name,data in (('api',cm),('api-scheduler',sch)):
+    check(all(data.get(k) for k in kyc), f'{name}: all 14 KYC config values present and non-empty')
+    check('{code}' in data.get('TERMII_OTP_TEMPLATE','') and data.get('OTP_EXPIRE_MINUTES')=='10', f'{name}: OTP template keeps {{code}} and the approved 10 minutes')
+    check(not any(k in data for k in ('TERMII_API_KEY','DOJAH_API_KEY','DOJAH_WEBHOOK_SECRET','KYC_FINGERPRINT_KEY')), f'{name}: no secret in the ConfigMap')
+    check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
 check(one(api,'Deployment','api-scheduler')['spec']['replicas']==1, 'scheduler single replica')
 check(not [d for d in api if d['kind']=='Service' and d['metadata']['name']=='api-scheduler'], 'scheduler has no Service')
 job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadata']['annotations']
