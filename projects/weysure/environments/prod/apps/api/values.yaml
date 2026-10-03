@@ -29,7 +29,12 @@ migration:
 
 # Non-secret configuration shared by both API workloads.
 commonEnv: &commonEnv
-  ENVIRONMENT: production
+  # Pre-launch: real infrastructure, test provider keys, data wiped before launch.
+  # Not production: from Weysure-API #36 the API refuses to boot with
+  # ENVIRONMENT=production/prod while Dojah points at sandbox. Never development, dev,
+  # test, testing or local: those switch on fake KYC/SMS providers, and test also
+  # turns off rate limiting. Launch day: production, together with live Dojah keys.
+  ENVIRONMENT: prelaunch
   SERVER_HOST: https://weysure-api.beyrictech.com
   FRONTEND_URL: https://weysure.beyrictech.com
   BACKEND_CORS_ORIGINS: '["https://weysure.beyrictech.com"]'
