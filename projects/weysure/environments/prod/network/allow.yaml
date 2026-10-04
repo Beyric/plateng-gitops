@@ -37,7 +37,7 @@ spec:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
       ports: [{ protocol: TCP, port: 3000 }]
 ---
-# API workloads (api, api-scheduler, migration Job): RDS in the VPC, Redis,
+# API workloads (api, api-scheduler, api-worker, migration Job): RDS in the VPC, Redis,
 # Vault (agent sidecar shares the pod), and HTTPS/SMTP to the internet
 # (Paystack, Cloudinary, mail). The VPC CIDR entry also covers the EKS API
 # server endpoint the Vault agent never needs but the SDKs may probe.
@@ -47,7 +47,7 @@ metadata: { name: api-egress, namespace: weysure-prod }
 spec:
   podSelector:
     matchExpressions:
-      - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, db-migrate] }
+      - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, api-worker, db-migrate] }
   policyTypes: [Egress]
   egress:
     - to: [{ ipBlock: { cidr: 10.0.0.0/16 } }]
@@ -70,7 +70,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, db-migrate] }
+              - { key: app.kubernetes.io/name, operator: In, values: [api, api-scheduler, api-worker, db-migrate] }
       ports: [{ protocol: TCP, port: 6379 }]
 ---
 # web has no outbound needs: NEXT_PUBLIC_* URLs are called by the browser, not the pod.
