@@ -55,6 +55,9 @@ components: {}
 #    service: { enabled: true }
 #    ingress: { enabled: false, host: "", clusterIssuer: letsencrypt-prod, className: traefik }
 #    probes: { path: /, startupFailureThreshold: 30 }
+#    probes: { exec: [sh, -c, "..."] }   # port-less: startup + liveness exec, no readiness
+#    vaultRestartCommand: ""  # overrides vaultAgent.restartCommand (the process to SIGTERM)
+#    enabled: true            # false renders nothing for the component
 #    resources: {}
 #    hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, cpu: 70 }
 #    pdb: { enabled: false, minAvailable: 1 }

@@ -31,7 +31,7 @@ spec:
             description: "Direct probe to the Service has failed for 2 minutes: the application itself is not answering."
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#sitedowninternal
         - alert: DeploymentReplicasMissing
-          expr: kube_deployment_status_replicas_available{namespace="weysure-prod", deployment=~"api|web"} < kube_deployment_spec_replicas{namespace="weysure-prod", deployment=~"api|web"}
+          expr: kube_deployment_status_replicas_available{namespace="weysure-prod", deployment=~"api|web|api-worker"} < kube_deployment_spec_replicas{namespace="weysure-prod", deployment=~"api|web|api-worker"}
           for: 10m
           labels: { severity: critical }
           annotations:

@@ -38,7 +38,7 @@ vault.hashicorp.com/agent-run-as-same-user: "true"
 vault.hashicorp.com/agent-pre-populate-only: "true"
 {{- else }}
 vault.hashicorp.com/agent-pre-populate: "false"
-vault.hashicorp.com/agent-inject-command-{{ $v.fileName }}: {{ $v.restartCommand | quote }}
+vault.hashicorp.com/agent-inject-command-{{ $v.fileName }}: {{ .restartCommand | default $v.restartCommand | quote }}
 {{- end }}
 {{- end -}}
 

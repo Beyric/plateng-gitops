@@ -27,7 +27,7 @@ migration:
   # SECRET_KEY and no app config. Proven 2026-10-01 on the deployed commit:
   # 49 migrations from an empty database with DATABASE_URL as the only variable.
 
-# Non-secret configuration shared by both API workloads.
+# Non-secret configuration shared by the API workloads (api, api-scheduler, api-worker).
 commonEnv: &commonEnv
   # Pre-launch: real infrastructure, test provider keys, data wiped before launch.
   # Not production: from Weysure-API #36 the API refuses to boot with
@@ -108,4 +108,36 @@ components:
     port: 8000
     service: { enabled: false }
     probes: { path: /api/v1/health }
+    writableDirs: [/tmp]
+  # Background jobs worker (platform note 2026-10-03b): polls the Postgres jobs
+  # table with FOR UPDATE SKIP LOCKED, so replicas never share a job. Same image
+  # as api. OFF until the image contains app.worker: the shared images.yaml tag
+  # would otherwise start a pod that cannot import it.
+  api-worker:
+    enabled: false
+    replicas: 1
+    vaultAgent: true
+    env: *commonEnv
+    # No port: no Service, no readiness, no preStop sleep.
+    # The image's CMD (/opt/run.sh) starts gunicorn, so the worker replaces it and
+    # does the Vault step run.sh does: wait for the rendered credential, export it.
+    command:
+      - /bin/bash
+      - -c
+      - |
+        for i in $(seq 1 60); do [[ -s "$VAULT_ENV_FILE" ]] && break; sleep 1; done
+        [[ -s "$VAULT_ENV_FILE" ]] || { echo "$VAULT_ENV_FILE was not rendered"; exit 1; }
+        set -a; . "$VAULT_ENV_FILE"; set +a
+        cd /app && exec python -m app.worker
+    # When the DB lease is renewed past max TTL, the agent re-renders the file and
+    # SIGTERMs the worker; it finishes its current job, exits, and the container
+    # restarts with the new credential (same mechanism as api's gunicorn).
+    vaultRestartCommand: sh -c "pkill -TERM -f '[a]pp.worker' || true"
+    # Liveness: the worker touches /tmp/worker-heartbeat; older than 45s = stuck.
+    probes:
+      exec: [sh, -c, 'test $(( $(date +%s) - $(stat -c %Y /tmp/worker-heartbeat) )) -lt 45']
+    terminationGracePeriodSeconds: 60   # SIGTERM -> finish the running job -> exit
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 512Mi }
     writableDirs: [/tmp]

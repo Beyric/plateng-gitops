@@ -30,7 +30,7 @@ spec:
       labels: {{- include "beyric-app.labels" (dict "root" $ "name" $name) | nindent 8 }}
       {{- if $c.vaultAgent }}
       annotations:
-        {{- include "beyric-app.vaultAnnotations" (dict "root" $ "role" $.Values.vaultAgent.role "credsPath" $.Values.vaultAgent.dbCredsPath "mode" "sidecar") | nindent 8 }}
+        {{- include "beyric-app.vaultAnnotations" (dict "root" $ "role" $.Values.vaultAgent.role "credsPath" $.Values.vaultAgent.dbCredsPath "mode" "sidecar" "restartCommand" $c.vaultRestartCommand) | nindent 8 }}
       {{- end }}
     spec:
       serviceAccountName: {{ $c.serviceAccount | default $name }}
@@ -72,6 +72,21 @@ spec:
             httpGet: { path: {{ $probes.path | default "/" }}, port: http }
             periodSeconds: 30
             failureThreshold: 3
+          {{- else if $probes.exec }}
+          # No port (a queue worker): startup + liveness from a command, no
+          # readiness - nothing routes traffic to it.
+          startupProbe:
+            exec:
+              command: {{- toYaml $probes.exec | nindent 16 }}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: {{ $probes.startupFailureThreshold | default 36 }}
+          livenessProbe:
+            exec:
+              command: {{- toYaml $probes.exec | nindent 16 }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
           {{- end }}
           {{- if or $c.env $.Values.envFromSecrets }}
           envFrom:
@@ -89,9 +104,13 @@ spec:
           {{- with $c.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- /* preStop sleep lets endpoints drop the pod before SIGTERM. Port-less
+                 workloads have no endpoints; the sleep would only eat their grace period. */}}
+          {{- if $c.port }}
           lifecycle:
             preStop:
               exec: { command: ["sh", "-c", "sleep {{ $c.preStopSleep | default 5 }}"] }
+          {{- end }}
           volumeMounts:
             {{- range $i, $d := $writable }}
             - { name: writable-{{ $i }}, mountPath: {{ $d }} }
