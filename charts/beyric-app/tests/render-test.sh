@@ -66,7 +66,7 @@ check(not [d for d in load('/tmp/beyric-app-api-worker-off.yaml') if d['metadata
 wk=api; wdep=one(wk,'Deployment','api-worker'); wps=wdep['spec']['template']['spec']; wcc=wps['containers'][0]; wa=wdep['spec']['template']['metadata']['annotations']
 check(wdep['spec']['replicas']==1 and wps['serviceAccountName']=='api-worker' and one(wk,'ServiceAccount','api-worker')['automountServiceAccountToken'] is True, 'api-worker: 1 replica, own SA with token for Vault')
 check(wa.get('vault.hashicorp.com/role')=='weysure-api' and wa.get('vault.hashicorp.com/agent-pre-populate')=='false' and wps.get('shareProcessNamespace') is True, 'api-worker: same Vault DB role as api, sidecar, shared PID namespace')
-check("[a]pp.worker" in wa.get('vault.hashicorp.com/agent-inject-command-env','') and 'gunicorn' not in wa.get('vault.hashicorp.com/agent-inject-command-env',''), 'api-worker: credential rotation signals the worker, not gunicorn')
+check("'^python -m app[.]worker'" in wa.get('vault.hashicorp.com/agent-inject-command-env','') and 'gunicorn' not in wa.get('vault.hashicorp.com/agent-inject-command-env',''), 'api-worker: credential rotation signals the worker (anchored, never the waiting wrapper), not gunicorn')
 check("[b]in/gunicorn" in one(wk,'Deployment','api')['spec']['template']['metadata']['annotations']['vault.hashicorp.com/agent-inject-command-env'], 'api keeps the gunicorn restart command')
 check('ports' not in wcc and 'readinessProbe' not in wcc and 'lifecycle' not in wcc, 'api-worker: no port, no readiness, no preStop sleep')
 check('/tmp/worker-heartbeat' in str(wcc['livenessProbe']['exec']) and '-lt 45' in str(wcc['livenessProbe']['exec']) and 'exec' in wcc['startupProbe'], 'api-worker: heartbeat startup + liveness probes (45s)')

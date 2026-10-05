@@ -133,7 +133,12 @@ components:
     # When the DB lease is renewed past max TTL, the agent re-renders the file and
     # SIGTERMs the worker; it finishes its current job, exits, and the container
     # restarts with the new credential (same mechanism as api's gunicorn).
-    vaultRestartCommand: sh -c "pkill -TERM -f '[a]pp.worker' || true"
+    # Anchored (^): the agent also runs this on its FIRST render, while the bash
+    # wrapper above is still waiting - and the wrapper's command line contains the
+    # text "app.worker". Unanchored, it killed the wrapper on every pod start
+    # (exit 143, one restart; seen 2026-10-05). Only the exec'd process starts
+    # with "python -m app.worker".
+    vaultRestartCommand: sh -c "pkill -TERM -f '^python -m app[.]worker' || true"
     # Liveness: the worker touches /tmp/worker-heartbeat; older than 45s = stuck.
     probes:
       exec: [sh, -c, 'test $(( $(date +%s) - $(stat -c %Y /tmp/worker-heartbeat) )) -lt 45']
