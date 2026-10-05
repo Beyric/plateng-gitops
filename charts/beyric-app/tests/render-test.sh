@@ -10,6 +10,8 @@ helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/value
 helm template weysure-web charts/beyric-app -n weysure-prod -f $P/apps/web/values.yaml -f $P/images.yaml > /tmp/beyric-app-web.yaml
 # api-worker is on in prod (2026-10-05); render it switched off too, as the chart default path.
 helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.enabled=false > /tmp/beyric-app-api-worker-off.yaml
+# Rollback stops the worker in git with replicas: 0; it must render 0, not the default.
+helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.replicas=0 > /tmp/beyric-app-api-worker-zero.yaml
 python3 - <<'PY'
 import yaml, sys
 def load(p): return [d for d in yaml.safe_load_all(open(p)) if d]
@@ -71,6 +73,7 @@ check("[b]in/gunicorn" in one(wk,'Deployment','api')['spec']['template']['metada
 check('ports' not in wcc and 'readinessProbe' not in wcc and 'lifecycle' not in wcc, 'api-worker: no port, no readiness, no preStop sleep')
 check('/tmp/worker-heartbeat' in str(wcc['livenessProbe']['exec']) and '-lt 45' in str(wcc['livenessProbe']['exec']) and 'exec' in wcc['startupProbe'], 'api-worker: heartbeat startup + liveness probes (45s)')
 check(wps['terminationGracePeriodSeconds']==60, 'api-worker: 60s to finish the running job')
+check(one(load('/tmp/beyric-app-api-worker-zero.yaml'),'Deployment','api-worker')['spec']['replicas']==0, 'replicas: 0 renders 0 (rollback stops the worker in git)')
 check('exec python -m app.worker' in wcc['command'][-1] and 'VAULT_ENV_FILE' in wcc['command'][-1], 'api-worker: wrapper loads the Vault credential then execs the worker')
 check(wcc['image']==one(wk,'Deployment','api')['spec']['template']['spec']['containers'][0]['image'], 'api-worker: same image as api')
 check({'configMapRef': {'name': 'api-worker-config'}} in wcc['envFrom'] and {'secretRef': {'name': 'weysure-app-config'}} in wcc['envFrom'] and one(wk,'ConfigMap','api-worker-config')['data']['ENVIRONMENT']==cm['ENVIRONMENT'], 'api-worker: same config and secret as api')
