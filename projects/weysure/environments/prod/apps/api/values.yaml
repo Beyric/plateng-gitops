@@ -111,10 +111,11 @@ components:
     writableDirs: [/tmp]
   # Background jobs worker (platform note 2026-10-03b): polls the Postgres jobs
   # table with FOR UPDATE SKIP LOCKED, so replicas never share a job. Same image
-  # as api. OFF until the image contains app.worker: the shared images.yaml tag
-  # would otherwise start a pod that cannot import it.
+  # as api (needs Weysure-API #43 or later: app.worker). Switched on 2026-10-05.
+  # Alerts: DeploymentReplicasMissing, and the Loki rules in
+  # platform/monitoring/loki-rules-jobs.yaml (from its jobs_stats log line).
   api-worker:
-    enabled: false
+    enabled: true
     replicas: 1
     vaultAgent: true
     env: *commonEnv

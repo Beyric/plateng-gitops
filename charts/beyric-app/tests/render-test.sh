@@ -8,8 +8,8 @@ helm lint charts/beyric-app -f $P/apps/api/values.yaml -f $P/images.yaml --quiet
 helm lint charts/beyric-app -f $P/apps/web/values.yaml -f $P/images.yaml --quiet
 helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml > /tmp/beyric-app-api.yaml
 helm template weysure-web charts/beyric-app -n weysure-prod -f $P/apps/web/values.yaml -f $P/images.yaml > /tmp/beyric-app-web.yaml
-# api-worker ships disabled until the image has app.worker; render it switched on too.
-helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.enabled=true > /tmp/beyric-app-api-worker.yaml
+# api-worker is on in prod (2026-10-05); render it switched off too, as the chart default path.
+helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.enabled=false > /tmp/beyric-app-api-worker-off.yaml
 python3 - <<'PY'
 import yaml, sys
 def load(p): return [d for d in yaml.safe_load_all(open(p)) if d]
@@ -62,8 +62,8 @@ ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='weysure-ap
 check(one(api,'PodDisruptionBudget','api')['spec']['minAvailable']==1 and one(api,'HorizontalPodAutoscaler','api')['spec']['maxReplicas']==4, 'api PDB + HPA')
 check(one(api,'ServiceAccount','api')['automountServiceAccountToken'] is True, 'api SA token mounted for vault auth')
 # api-worker (queue worker, no port)
-check(not [d for d in api if d['metadata']['name'].startswith('api-worker')], 'api-worker renders nothing while disabled')
-wk=load('/tmp/beyric-app-api-worker.yaml'); wdep=one(wk,'Deployment','api-worker'); wps=wdep['spec']['template']['spec']; wcc=wps['containers'][0]; wa=wdep['spec']['template']['metadata']['annotations']
+check(not [d for d in load('/tmp/beyric-app-api-worker-off.yaml') if d['metadata']['name'].startswith('api-worker')], 'api-worker renders nothing when disabled')
+wk=api; wdep=one(wk,'Deployment','api-worker'); wps=wdep['spec']['template']['spec']; wcc=wps['containers'][0]; wa=wdep['spec']['template']['metadata']['annotations']
 check(wdep['spec']['replicas']==1 and wps['serviceAccountName']=='api-worker' and one(wk,'ServiceAccount','api-worker')['automountServiceAccountToken'] is True, 'api-worker: 1 replica, own SA with token for Vault')
 check(wa.get('vault.hashicorp.com/role')=='weysure-api' and wa.get('vault.hashicorp.com/agent-pre-populate')=='false' and wps.get('shareProcessNamespace') is True, 'api-worker: same Vault DB role as api, sidecar, shared PID namespace')
 check("[a]pp.worker" in wa.get('vault.hashicorp.com/agent-inject-command-env','') and 'gunicorn' not in wa.get('vault.hashicorp.com/agent-inject-command-env',''), 'api-worker: credential rotation signals the worker, not gunicorn')

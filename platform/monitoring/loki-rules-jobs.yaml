@@ -11,8 +11,9 @@
 # oldest_overdue_pending_seconds is null when nothing is overdue: that sample is
 # dropped (__error__ filter), it never counts as 0 or as a failure.
 #
-# No series while api-worker is off: these rules stay silent until it runs.
-# "No stats line at all" is added with the switch-on PR (it would fire today).
+# JobsStatsMissing: no jobs_stats line for 15 min means the worker is not running
+# its loop (or not logging); the pod-level view is DeploymentReplicasMissing.
+# platform-sleep.sh silences every alert in Alertmanager, these included.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -86,3 +87,16 @@ data:
               summary: "A background job ran out of retries (dead)"
               description: "Dead jobs rose to {{ $value }}. A dead job never runs again on its own: inspect and re-queue or cancel it (developers' jobs SOP)."
               runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#jobsdeadincreased
+          - alert: JobsStatsMissing
+            expr: |
+              absent_over_time(
+                {namespace="weysure-prod", container="api-worker"}
+                  |= `"event": "jobs_stats"`
+                [15m]
+              )
+            for: 5m
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "api-worker has not logged jobs_stats for 20 minutes"
+              description: "The worker logs one line a minute. None means it is down, its loop is stuck, or its logs are not reaching Loki."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#jobsstatsmissing
