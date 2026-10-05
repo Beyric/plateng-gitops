@@ -18,7 +18,8 @@ metadata:
     secret.reloader.stakater.com/reload: {{ join "," $.Values.envFromSecrets | quote }}
     {{- end }}
 spec:
-  replicas: {{ $c.replicas | default 1 }}
+  {{- /* hasKey, not `default`: `default 1` treats 0 as unset, so replicas: 0 rendered 1. */}}
+  replicas: {{ if hasKey $c "replicas" }}{{ $c.replicas }}{{ else }}1{{ end }}
   revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
