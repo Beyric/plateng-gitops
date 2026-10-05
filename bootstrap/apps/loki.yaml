@@ -45,6 +45,20 @@ spec:
             reject_old_samples_max_age: 168h
             ingestion_rate_mb: 8
             ingestion_burst_size_mb: 16
+          # Log-based alerts. The chart's sidecar (loki-sc-rules) copies every
+          # ConfigMap labelled loki_rule in this namespace into /rules; the ruler
+          # reads them from there (not S3) and sends to the same Alertmanager as
+          # Prometheus. Single tenant (auth_enabled: false) -> files live in
+          # /rules/fake, set per ConfigMap by the k8s-sidecar-target-directory
+          # annotation. rule_path is the ruler's scratch copy: keep it apart.
+          rulerConfig:
+            wal: { dir: /var/loki/ruler-wal }
+            storage:
+              type: local
+              local: { directory: /rules }
+            rule_path: /var/loki/rules-scratch
+            alertmanager_url: http://kps-alertmanager.monitoring.svc:9093
+            enable_api: true
           compactor:
             retention_enabled: true
             delete_request_store: s3

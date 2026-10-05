@@ -1,0 +1,88 @@
+# Log-based alerts for the Weysure jobs worker (api-worker). Evaluated by the Loki
+# ruler (bootstrap/apps/loki.yaml), routed by the same Alertmanager as Prometheus.
+#
+# Source: one line per minute on api-worker stdout (platform note 2026-10-04 §4):
+#   2026-10-05 02:53:40.934 | INFO     | logging:callHandlers:1706 - {"event": "jobs_stats", "pending": 1, "oldest_overdue_pending_seconds": 0, "dead": 0}
+# The JSON follows a loguru prefix, so the rules cut from the first "{" and parse.
+# Only the one field a rule needs is extracted, and the cut-out text is dropped:
+# a plain `| json` turns every field (and the whole line) into labels, which makes
+# each distinct line its own series and breaks first/last comparisons.
+# Aggregations are max() across pods: a replaced worker pod is a new series.
+# oldest_overdue_pending_seconds is null when nothing is overdue: that sample is
+# dropped (__error__ filter), it never counts as 0 or as a failure.
+#
+# No series while api-worker is off: these rules stay silent until it runs.
+# "No stats line at all" is added with the switch-on PR (it would fire today).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-jobs
+  namespace: monitoring
+  labels: { loki_rule: "1" }
+  annotations:
+    # auth_enabled: false -> single tenant "fake" -> /rules/fake/<file>
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  jobs.yaml: |
+    groups:
+      - name: weysure.jobs
+        interval: 1m
+        rules:
+          - alert: JobsQueueLagging
+            expr: |
+              max(
+                max_over_time(
+                  {namespace="weysure-prod", container="api-worker"}
+                    |= `"event": "jobs_stats"`
+                    | regexp `(?P<stats>\{.*\})`
+                    | line_format `{{.stats}}`
+                    | drop stats
+                    | json overdue="oldest_overdue_pending_seconds"
+                    | unwrap overdue | __error__=""
+                  [5m]
+                )
+              ) > 300
+            for: 2m
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "Jobs are overdue by more than 5 minutes"
+              description: "Oldest overdue pending job: {{ $value }}s. The worker is behind or stuck; check api-worker logs and GET /api/v1/admin/jobs/stats."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#jobsqueuelagging
+          # dead only falls when a person re-queues or cancels a job, so "dead > 0"
+          # would fire for ever. This fires when the latest count is higher than the
+          # highest count in the 10 minutes before the last 10, i.e. it went UP, and
+          # clears by itself about 10 minutes later. No earlier data (worker just
+          # started) means no comparison and no alert. Known gap: re-queue then a new
+          # failure inside the same 10 minutes returns to the old count and is missed.
+          - alert: JobsDeadIncreased
+            expr: |
+              max(
+                last_over_time(
+                  {namespace="weysure-prod", container="api-worker"}
+                    |= `"event": "jobs_stats"`
+                    | regexp `(?P<stats>\{.*\})`
+                    | line_format `{{.stats}}`
+                    | drop stats
+                    | json dead="dead"
+                    | unwrap dead | __error__=""
+                  [10m]
+                )
+              )
+              >
+              max(
+                max_over_time(
+                  {namespace="weysure-prod", container="api-worker"}
+                    |= `"event": "jobs_stats"`
+                    | regexp `(?P<stats>\{.*\})`
+                    | line_format `{{.stats}}`
+                    | drop stats
+                    | json dead="dead"
+                    | unwrap dead | __error__=""
+                  [10m] offset 10m
+                )
+              )
+            labels: { severity: critical, namespace: weysure-prod }
+            annotations:
+              summary: "A background job ran out of retries (dead)"
+              description: "Dead jobs rose to {{ $value }}. A dead job never runs again on its own: inspect and re-queue or cancel it (developers' jobs SOP)."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#jobsdeadincreased
