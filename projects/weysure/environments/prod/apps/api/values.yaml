@@ -14,7 +14,11 @@ externalSecret:
 vaultAgent:
   role: weysure-api
   dbCredsPath: database/creds/weysure-app
-  dbHost: weysure-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com
+  # 2026-10-08 recovery: weysure-postgres (us-east-1a) could not be started -
+  # InsufficientDBInstanceCapacity for db.t4g.micro in every AZ. Point-in-time
+  # restore (to 2026-10-06 23:09:30 UTC, the sleep) as weysure-postgres-v2,
+  # db.t3.micro in us-east-1b. The old instance is kept, stopped, untouched.
+  dbHost: weysure-postgres-v2.cm7yqww8uycm.us-east-1.rds.amazonaws.com
   dbName: weysure
 
 migration:
