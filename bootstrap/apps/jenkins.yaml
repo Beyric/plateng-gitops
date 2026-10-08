@@ -14,6 +14,7 @@ spec:
     helm:
       valuesObject:
         controller:
+          priorityClassName: platform-stateful   # zonal volume (1a): spare it from preemption
           jenkinsUrl: https://jenkins.beyrictech.com
           # The controller never runs builds; agents do. Set here, not in a JCasC
           # script - the chart's defaultConfig already emits jenkins.numExecutors,

@@ -20,6 +20,9 @@ spec:
         fullnameOverride: alloy
         controller:
           type: daemonset
+          # Node agent: must run on every node, even a full one (2026-10-08 wake:
+          # Pending on a 99 %-requested system node, no logs from it).
+          priorityClassName: system-node-critical
           volumes:
             extra:
               - { name: alloy-storage, emptyDir: {} }

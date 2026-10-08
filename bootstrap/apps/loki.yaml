@@ -70,6 +70,7 @@ spec:
               active_index_directory: /var/loki/index
               cache_location: /var/loki/index_cache
         singleBinary:
+          priorityClassName: platform-stateful   # zonal volume (1b): spare it from preemption
           replicas: 1
           nodeSelector: { node-role: system }
           resources:
