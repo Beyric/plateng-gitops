@@ -35,6 +35,7 @@ spec:
           # control plane can reach (Finding 31); failurePolicy is Ignore.
         prometheus:
           prometheusSpec:
+            priorityClassName: platform-stateful   # zonal volume (1a): spare it from preemption
             retention: 7d
             retentionSize: 13GB           # below the 15 GB volume so it never fills
             nodeSelector: { node-role: system }
@@ -53,6 +54,7 @@ spec:
             externalLabels: { cluster: beyric-prod }
         alertmanager:
           alertmanagerSpec:
+            priorityClassName: platform-stateful   # zonal volume (1a): spare it from preemption
             configSecret: alertmanager-config   # rendered by ESO: platform/monitoring/secrets.yaml
             nodeSelector: { node-role: system }
             resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
@@ -118,6 +120,8 @@ spec:
           nodeSelector: { node-role: system }
           resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
         prometheus-node-exporter:
+          # Node agent: must run on every node, even a full one (2026-10-08 wake).
+          priorityClassName: system-node-critical
           resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 64Mi } }
   destination: { server: https://kubernetes.default.svc, namespace: monitoring }
   syncPolicy:

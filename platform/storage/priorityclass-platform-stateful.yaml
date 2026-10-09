@@ -1,0 +1,20 @@
+# Protects pods tied to a zonal EBS volume from being chosen for preemption.
+#
+# The node agents (alloy, node-exporter) run as system-node-critical so they are
+# never left Pending on a full node (2026-10-08 wake: both Pending on a 99 %
+# requested system node). Preemption then evicts lower-priority pods to make room.
+# Prometheus, Alertmanager and Jenkins have volumes in us-east-1a and Loki in
+# us-east-1b, each zone with ONE system node: evicted, they could not move and
+# would stay Pending (Prometheus Pending = no alerting). This class sits above the
+# default (0), so the scheduler gives them back first and evicts stateless pods,
+# which can run anywhere. preemptionPolicy Never: they never evict anyone.
+# Lives with storage because zonal volumes are the reason; synced at wave 0,
+# before every app that references it (a pod naming a missing class is rejected).
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-stateful
+value: 100000
+globalDefault: false
+preemptionPolicy: Never
+description: "Platform pods bound to a zonal volume (Prometheus, Alertmanager, Jenkins, Loki). Spared by preemption; never preempt."
