@@ -64,9 +64,10 @@ commonEnv: &commonEnv
 
   # --- KYC phase 3: identity verification (Dojah) ------------------------------
   # Account identifiers and the PUBLIC key: not secret. DOJAH_API_KEY,
-  # DOJAH_WEBHOOK_SECRET and KYC_FINGERPRINT_KEY are in Vault. In Vault the
-  # webhook secret equals the API key: confirmed correct for Dojah (2026-10-02),
-  # not a paste mistake.
+  # DOJAH_WEBHOOK_SECRET and KYC_FINGERPRINT_KEY are in Vault.
+  # 2026-10-09: new Dojah sandbox app - app ID, public key and both widget IDs
+  # here, API key and webhook secret in Vault, changed together. The webhook
+  # secret is now separate from the API key (until then they were equal).
   # SANDBOX on purpose (2026-10-02): no real users yet; production checks hit real
   # BVN/NIN records and are billed per check. At launch change DOJAH_ENVIRONMENT to
   # production, DOJAH_BASE_URL to https://api.dojah.io, the public key to the live
@@ -74,10 +75,10 @@ commonEnv: &commonEnv
   # host answers a misleading 401.
   DOJAH_ENVIRONMENT: sandbox
   DOJAH_BASE_URL: https://sandbox.dojah.io
-  DOJAH_APP_ID: 6a3bdb178f7b433324faf48e
-  DOJAH_PUBLIC_KEY: test_pk_Hu796uVPDpfB1x1ENktPYCb9q
-  DOJAH_BVN_WIDGET_ID: 6a513202bf3ab16c77ce6813
-  DOJAH_NIN_WIDGET_ID: 6a513b6fbf3ab16c77ced126
+  DOJAH_APP_ID: 6ac8ffaff6fcadcd5efb83b6
+  DOJAH_PUBLIC_KEY: test_pk_HYVen9WbfYaZkLXgBSR39SEEI
+  DOJAH_BVN_WIDGET_ID: 6ac903aef6fcadcd5efb95e0
+  DOJAH_NIN_WIDGET_ID: 6ac90a7012645c3992709361
   DOJAH_FACE_MATCH_THRESHOLD: "70"
 
 components:
