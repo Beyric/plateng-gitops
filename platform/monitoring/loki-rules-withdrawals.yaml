@@ -1,0 +1,65 @@
+# Log-based alerts for the withdrawal re-check (Weysure-API #60 job, #61 log lines).
+# Evaluated by the Loki ruler (bootstrap/apps/loki.yaml), routed by the same
+# Alertmanager as Prometheus; same layout as loki-rules-wallet.yaml.
+#
+# Source: app/worker/handlers/withdrawals.py logs one JSON line per event
+# (json.dumps, so `"event": "..."` with a space), behind the loguru prefix:
+#   ... | ERROR    | logging:callHandlers:1706 - {"event": "withdrawal_unresolved", "withdrawal_id": "..."}
+#   ... | WARNING  | logging:callHandlers:1706 - {"event": "withdrawal_refunded_by_recheck", "withdrawal_id": "..."}
+# - withdrawal_unresolved: once per withdrawal, on the re-check attempt that raises
+#   the admin alert (WITHDRAWAL_RECHECK_ALERT_AFTER_ATTEMPTS, 3 by default).
+# - withdrawal_refunded_by_recheck: each time the worker refunds a withdrawal that
+#   Paystack says was never sent.
+# Both are emitted by api-worker today; api is included so a future webhook-path
+# emitter is not missed silently.
+#
+# One-shot events, so count_over_time, not a level. Window 30m: the alert fires on
+# the first evaluation (no `for:`) and resolves by itself 30 min after the last
+# line. RESOLVED DOES NOT MEAN SETTLED: the withdrawal still needs an admin.
+# sum() drops withdrawal_id (no label cardinality, one page per alert); the value
+# is the number of events in the window, the ids are in Loki (runbook query).
+# Dead re-check jobs are covered separately by JobsDeadIncreased (loki-rules-jobs.yaml).
+# platform-sleep.sh silences every alert in Alertmanager, these included.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-withdrawals
+  namespace: monitoring
+  labels: { loki_rule: "1" }
+  annotations:
+    # auth_enabled: false -> single tenant "fake" -> /rules/fake/<file>
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  withdrawals.yaml: |
+    groups:
+      - name: weysure.withdrawals
+        interval: 1m
+        rules:
+          - alert: WithdrawalUnresolved
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container=~"api|api-worker"}
+                    |= `"event": "withdrawal_unresolved"`
+                  [30m]
+                )
+              ) > 0
+            labels: { severity: critical, namespace: weysure-prod }
+            annotations:
+              summary: "A withdrawal is still unresolved after repeated Paystack re-checks"
+              description: "{{ $value }} withdrawal(s) could not be settled by the worker re-check: the user's debit is held and nobody knows yet whether Paystack sent the money. An admin must settle it. Never re-send the transfer from the Paystack dashboard. This alert resolves by itself after 30 min; the withdrawal does not."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#withdrawalunresolved
+          - alert: WithdrawalRefundedByRecheck
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container=~"api|api-worker"}
+                    |= `"event": "withdrawal_refunded_by_recheck"`
+                  [30m]
+                )
+              ) > 0
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "The worker refunded a withdrawal after a Paystack re-check"
+              description: "{{ $value }} withdrawal(s) were refunded to the wallet because Paystack has no record of the transfer. Expected after a Paystack outage; make sure support did not also pay the user back by hand (double payment)."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#withdrawalrefundedbyrecheck
