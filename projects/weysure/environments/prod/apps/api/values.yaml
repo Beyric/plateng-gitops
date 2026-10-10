@@ -46,6 +46,11 @@ commonEnv: &commonEnv
   RUN_MIGRATIONS: "false"          # the PreSync Job owns migrations (spec D3)
   WEB_CONCURRENCY: "2"
   WALLET_RECONCILIATION_SCHEDULER_ENABLED: "false"
+  # Wallet origins (Weysure-API feat/wallet-origins, migration 9f1d6a2b8e47): "false" =
+  # origin lots are tracked but never enforced. Written out so that switching it on,
+  # and the rollback (back to "false", never an image revert), is a one-line diff.
+  # Before "true": web PR 7 live + one clean WalletLotDrift-free reconciliation run.
+  ORIGIN_RULES_ENFORCED: "false"
 
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
@@ -105,7 +110,7 @@ components:
       <<: *commonEnv
       WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"
       WALLET_RECONCILIATION_INTERVAL_MINUTES: "30"
-      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"
+      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"   # alert: platform/monitoring/loki-rules-wallet.yaml
     resources:
       requests: { cpu: 100m, memory: 384Mi }
       limits: { cpu: 500m, memory: 768Mi }

@@ -1,0 +1,53 @@
+# Log-based alert for the wallet origin-lot invariant (Weysure-API feat/wallet-origins).
+# Evaluated by the Loki ruler (bootstrap/apps/loki.yaml), routed by the same
+# Alertmanager as Prometheus; same layout as loki-rules-jobs.yaml.
+#
+# Source: check_lot_invariant() logs one line per run that finds drift, i.e. users
+# whose open lots do not add up to their wallet_balance:
+#   2026-10-10 00:30:00.123 | ERROR    | app.services.wallet_reconciliation_service:check_lot_invariant:221 - {"event": "wallet_lot_drift", "users": 3}
+# Not rate-limited (the admin inbox notification is). Two callers log it:
+#   - api-scheduler: the periodic reconciliation, every 30 min in prod (api values);
+#   - api: an admin running reconcile / repair by hand (full scan afterwards).
+# Hence container=~"api|api-scheduler". A clean run logs nothing.
+#
+# Window 35m = one 30-min reconciliation interval + 5 min slack. While drift
+# persists every run logs a fresh line, so the alert stays firing; it clears by
+# itself ~35 min after the last drift line. No `for:`: one line is already a
+# confirmed finding, not a noisy sample. Value = drifted users in the window.
+# Known gap: if the scheduler stops running, this stays silent (no "missing" rule;
+# the pod-level view is DeploymentReplicasMissing).
+# platform-sleep.sh silences every alert in Alertmanager, this included.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-wallet
+  namespace: monitoring
+  labels: { loki_rule: "1" }
+  annotations:
+    # auth_enabled: false -> single tenant "fake" -> /rules/fake/<file>
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  wallet.yaml: |
+    groups:
+      - name: weysure.wallet
+        interval: 1m
+        rules:
+          - alert: WalletLotDrift
+            expr: |
+              max(
+                max_over_time(
+                  {namespace="weysure-prod", container=~"api|api-scheduler"}
+                    |= `"event": "wallet_lot_drift"`
+                    | regexp `(?P<drift>\{.*\})`
+                    | line_format `{{.drift}}`
+                    | drop drift
+                    | json users="users"
+                    | unwrap users | __error__=""
+                  [35m]
+                )
+              ) > 0
+            labels: { severity: critical, namespace: weysure-prod }
+            annotations:
+              summary: "Wallet origin lots do not add up to wallet balances"
+              description: "{{ $value }} user(s) have open lots that differ from wallet_balance. Ledger bug, or a deploy artefact if it is the first run after a wallet-origins rollout (old pods served between the PreSync backfill and the new pods). Do not switch ORIGIN_RULES_ENFORCED on while this fires."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#walletlotdrift
