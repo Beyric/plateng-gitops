@@ -99,6 +99,10 @@ components:
       limits: { cpu: "1", memory: 1Gi }
     hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     pdb: { enabled: true, minAvailable: 1 }
+    # Never two replicas on one node (2026-10-13): with the default soft rule all
+    # api and web pods sat on one spot node, so one spot interruption took both
+    # sites down at once. Karpenter adds a node when no second one has room.
+    topologySpread: { whenUnsatisfiable: DoNotSchedule }
     terminationGracePeriodSeconds: 60
     # The application writes nothing to disk (Weysure-API #14: logs to stdout;
     # #16: uploads to Cloudinary), so /tmp is the only writable path left.

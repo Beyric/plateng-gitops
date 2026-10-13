@@ -44,7 +44,12 @@ spec:
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: {{ ($c.topologySpread | default dict).whenUnsatisfiable | default "ScheduleAnyway" }}
+          # Count only nodes this pod may run on (a node whose taint it does not
+          # tolerate is not an empty "domain" it must fill), and only this
+          # ReplicaSet's pods, so a rollout spreads the new pods among themselves.
+          nodeTaintsPolicy: Honor
+          matchLabelKeys: [pod-template-hash]
           labelSelector:
             matchLabels: {{- include "beyric-app.selector" (dict "root" $ "name" $name) | nindent 14 }}
       containers:
