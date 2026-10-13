@@ -18,7 +18,8 @@ spec:
     privateKeySecretRef: { name: letsencrypt-staging-account-key }
     solvers:
       # DNS-01, not HTTP-01. HTTP-01 needs the ACME server to reach port 80 on
-      # the origin, which is impossible here: the NLB only admits Cloudflare IPs.
+      # the origin, which is impossible here: the NLB only admits Cloudflare IPs
+      # (loadBalancerSourceRanges in bootstrap/apps/traefik.yaml).
       # DNS-01 proves control by writing a TXT record instead, and is the only
       # option that also works for wildcard certificates.
       - dns01:
