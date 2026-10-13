@@ -33,6 +33,30 @@ spec:
             service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/ping"
             service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8080"
             service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "deregistration_delay.timeout_seconds=30"
+          # Only Cloudflare may reach the origin (ADR-011). The Load Balancer
+          # Controller writes these ranges into the NLB's frontend security
+          # group, which otherwise admits 0.0.0.0/0 on 80/443 and lets anyone
+          # skip the WAF by calling the NLB hostname directly (found 2026-10-12).
+          # Every public host is Cloudflare-proxied, so no client is lost.
+          # Source: https://www.cloudflare.com/ips-v4 (checked 2026-10-13).
+          # Keep in step with forwardedHeaders.trustedIPs below.
+          spec:
+            loadBalancerSourceRanges:
+              - 173.245.48.0/20
+              - 103.21.244.0/22
+              - 103.22.200.0/22
+              - 103.31.4.0/22
+              - 141.101.64.0/18
+              - 108.162.192.0/18
+              - 190.93.240.0/20
+              - 188.114.96.0/20
+              - 197.234.240.0/22
+              - 198.41.128.0/17
+              - 162.158.0.0/15
+              - 104.16.0.0/13
+              - 104.24.0.0/14
+              - 172.64.0.0/13
+              - 131.0.72.0/22
         # Chart 41 removed the ports.web.redirectTo, ports.websecure.tls and
         # top-level logs values. Everything below is expressed as Traefik's own
         # CLI flags instead, which have been stable for years and are not
