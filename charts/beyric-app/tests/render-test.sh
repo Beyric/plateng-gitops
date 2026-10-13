@@ -46,6 +46,10 @@ for name,data in (('api',cm),('api-scheduler',sch)):
     check(env and env not in ('development','dev','test','testing','local'), f'{name}: ENVIRONMENT set and not one that enables fake providers')
     check(env not in ('production','prod') or (data.get('DOJAH_ENVIRONMENT')=='production' and 'sandbox' not in data.get('DOJAH_BASE_URL','')), f'{name}: production ENVIRONMENT never with Dojah sandbox (the API refuses to boot)')
     check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
+for n in ('api-config','api-scheduler-config','api-worker-config'):
+    d=one(api,'ConfigMap',n)['data']
+    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='off' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds off, trusted proxy = VPC')
+    check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
 check(one(api,'Deployment','api-scheduler')['spec']['replicas']==1, 'scheduler single replica')
 check(not [d for d in api if d['kind']=='Service' and d['metadata']['name']=='api-scheduler'], 'scheduler has no Service')
 job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadata']['annotations']

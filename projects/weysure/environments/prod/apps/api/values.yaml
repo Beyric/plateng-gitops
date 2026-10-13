@@ -49,8 +49,19 @@ commonEnv: &commonEnv
   # Wallet origins (Weysure-API feat/wallet-origins, migration 9f1d6a2b8e47): "false" =
   # origin lots are tracked but never enforced. Written out so that switching it on,
   # and the rollback (back to "false", never an image revert), is a one-line diff.
-  # Before "true": web PR 7 live + one clean WalletLotDrift-free reconciliation run.
-  ORIGIN_RULES_ENFORCED: "false"
+  # On since 2026-10-13: web 7c (#48, `4b9e2223c440`) live and checked by the developers;
+  # 24 h of reconciliation runs with 0 wallet_lot_drift, 0 mismatches, 0 errors.
+  ORIGIN_RULES_ENFORCED: "true"
+
+  # Risk holds (Weysure-API #64, not deployed yet): written out off, so the starting state
+  # is in git, not in code defaults. Ignored by images before #64. Each later stage
+  # (capture, shadow, enforce) is its own reviewed change. enforce needs the flag above.
+  RISK_HOLDS_MODE: "off"
+  RISK_SIGNALS_CAPTURE_ENABLED: "false"
+  # Socket peers allowed to vouch for CF-Connecting-IP (Weysure-API #66, not deployed yet).
+  # The VPC: only Traefik (behind the Cloudflare-only NLB, gitops #69) reaches the API.
+  # A platform fact, so it lives here, not as a code default. Ignored by earlier images.
+  TRUSTED_PROXY_CIDRS: "10.0.0.0/16"
 
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
