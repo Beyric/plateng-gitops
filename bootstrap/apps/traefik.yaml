@@ -103,6 +103,32 @@ spec:
             labelSelector:
               matchLabels:
                 app.kubernetes.io/name: traefik
+        # Only the NLB may talk to the entrypoints (2026-10-13). Without this any
+        # pod in the cluster (a Jenkins agent running PR code included) could call
+        # Traefik directly with its own CF-Connecting-IP, which the API trusts
+        # from 10.0.0.0/16. The NLB's ENIs live in the public subnets; no pod does
+        # (pods are in 10.0.3.0/24 and 10.0.4.0/24). 8080 is the NLB health check.
+        # Kubelet probes are still allowed by the VPC CNI agent (default-deny in
+        # weysure-prod has run with probes since Phase 8).
+        extraObjects:
+          - apiVersion: networking.k8s.io/v1
+            kind: NetworkPolicy
+            metadata: { name: traefik-ingress-from-nlb, namespace: traefik }
+            spec:
+              podSelector: { matchLabels: { app.kubernetes.io/name: traefik } }
+              policyTypes: [Ingress]
+              ingress:
+                - from:
+                    - ipBlock: { cidr: 10.0.1.0/24 }   # beyric-prod-vpc-public-us-east-1a
+                    - ipBlock: { cidr: 10.0.2.0/24 }   # beyric-prod-vpc-public-us-east-1b
+                  ports:
+                    - { protocol: TCP, port: 8000 }
+                    - { protocol: TCP, port: 8443 }
+                    - { protocol: TCP, port: 8080 }
+                - from:
+                    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+                  ports:
+                    - { protocol: TCP, port: 9100 }
   destination: { server: https://kubernetes.default.svc, namespace: traefik }
   syncPolicy:
     managedNamespaceMetadata:
