@@ -25,4 +25,8 @@ components:
       limits: { cpu: 500m, memory: 512Mi }
     hpa: { enabled: true, minReplicas: 2, maxReplicas: 4, cpu: 70 }
     pdb: { enabled: true, minAvailable: 1 }
+    # Never two replicas on one node (2026-10-13): with the default soft rule all
+    # api and web pods sat on one spot node, so one spot interruption took both
+    # sites down at once. Karpenter adds a node when no second one has room.
+    topologySpread: { whenUnsatisfiable: DoNotSchedule }
     writableDirs: [/tmp, /app/.next/cache]
