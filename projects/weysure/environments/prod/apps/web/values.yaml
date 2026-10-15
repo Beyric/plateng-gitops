@@ -18,7 +18,7 @@ components:
     env:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
-    ingress: { enabled: true, host: weysure.beyrictech.com }
+    ingress: { enabled: true, host: weysure.beyrictech.com, extraHosts: [weysure.com, www.weysure.com] }
     probes: { path: / }
     resources:
       requests: { cpu: 100m, memory: 256Mi }

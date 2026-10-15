@@ -103,7 +103,7 @@ components:
     port: 8000
     vaultAgent: true
     env: *commonEnv
-    ingress: { enabled: true, host: weysure-api.beyrictech.com }
+    ingress: { enabled: true, host: weysure-api.beyrictech.com, extraHosts: [api.weysure.com] }
     probes: { path: /api/v1/health }
     resources:
       requests: { cpu: 250m, memory: 512Mi }
