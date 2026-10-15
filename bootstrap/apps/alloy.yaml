@@ -87,7 +87,19 @@ spec:
 
               loki.source.kubernetes "pods" {
                 targets    = discovery.relabel.pods.output
+                forward_to = [loki.process.redact.receiver]
+              }
+
+              // Never store login tokens: any JWT anywhere in a line becomes <redacted-jwt>
+              // before it reaches Loki. Found 2026-10-15: the API access log wrote the
+              // WebSocket ?token=<JWT> (Weysure-API#76), 7-day tokens = 7-day retention.
+              // Applies to every namespace, so a future leak elsewhere is covered too.
+              loki.process "redact" {
                 forward_to = [loki.write.default.receiver]
+                stage.replace {
+                  expression = `(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+)`
+                  replace    = "<redacted-jwt>"
+                }
               }
 
               loki.write "default" {
