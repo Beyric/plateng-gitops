@@ -39,9 +39,12 @@ commonEnv: &commonEnv
   # test, testing or local: those switch on fake KYC/SMS providers, and test also
   # turns off rate limiting. Launch day: production, together with live Dojah keys.
   ENVIRONMENT: prelaunch
-  SERVER_HOST: https://weysure-api.beyrictech.com
-  FRONTEND_URL: https://weysure.beyrictech.com
-  BACKEND_CORS_ORIGINS: '["https://weysure.beyrictech.com"]'
+  # Domain cutover phase B (infra-tools plans/2026-10-15-domain-cutover-weysure-com.md):
+  # links and payment_url use the new hosts; CORS admits both web origins until the old
+  # web host redirects to weysure.com (phase C).
+  SERVER_HOST: https://api.weysure.com
+  FRONTEND_URL: https://weysure.com
+  BACKEND_CORS_ORIGINS: '["https://weysure.com", "https://weysure.beyrictech.com"]'
   REDIS_URL: redis://redis:6379/0
   RUN_MIGRATIONS: "false"          # the PreSync Job owns migrations (spec D3)
   WEB_CONCURRENCY: "2"
