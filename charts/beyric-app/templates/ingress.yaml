@@ -16,8 +16,15 @@ spec:
   tls:
     - secretName: {{ $name }}-tls
       hosts: [{{ $ing.host | required (printf "components.%s.ingress.host is required" $name) }}]
+    {{- with $ing.extraHosts }}
+    # Own secret, so own Certificate: a failed issue for an extra host never blocks
+    # the main host's certificate or its renewals.
+    - secretName: {{ $name }}-extra-tls
+      hosts: [{{ join ", " . }}]
+    {{- end }}
   rules:
-    - host: {{ $ing.host }}
+    {{- range $host := concat (list $ing.host) ($ing.extraHosts | default list) }}
+    - host: {{ $host }}
       http:
         paths:
           - path: /
@@ -26,5 +33,6 @@ spec:
               service:
                 name: {{ $name }}
                 port: { name: http }
+    {{- end }}
 {{- end }}
 {{- end }}
