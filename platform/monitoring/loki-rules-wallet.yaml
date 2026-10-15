@@ -15,9 +15,12 @@
 # persists every run logs a fresh line, so the alert stays firing; it clears by
 # itself ~35 min after the last drift line. No `for:`: one line is already a
 # confirmed finding, not a noisy sample. Value = drifted users in the window.
-# Known gap: if the periodic run stops, this stays silent. After #68 every run logs
-# `wallet reconciliation: N users, M mismatches` on api-worker; a "missing" rule on that
-# line follows once #68 is live (it would fire today, before the line exists).
+# WalletReconciliationMissing covers the gap above: since Weysure-API #68 (live 2026-10-15,
+# 7249abff973c) every run logs on api-worker, also when disabled:
+#   2026-10-15 19:05:52.729 | INFO     | app.worker.handlers.wallet_reconciliation:handle_wallet_reconciliation:51 - wallet reconciliation: 1 users, 0 mismatches
+# A failed run logs `wallet reconciliation failed: ...` (no match, on purpose) and requeues.
+# No line for 75m = 2 intervals + 15 min slack: the flag is off on the worker, the job was
+# disabled or cancelled, or the worker is down (then JobsStatsMissing fires too).
 # platform-sleep.sh silences every alert in Alertmanager, this included.
 apiVersion: v1
 kind: ConfigMap
@@ -53,3 +56,15 @@ data:
               summary: "Wallet origin lots do not add up to wallet balances"
               description: "{{ $value }} user(s) have open lots that differ from wallet_balance. Ledger bug, or a deploy artefact if it is the first run after a wallet-origins rollout (old pods served between the PreSync backfill and the new pods). Do not switch ORIGIN_RULES_ENFORCED on while this fires."
               runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#walletlotdrift
+          - alert: WalletReconciliationMissing
+            expr: |
+              absent_over_time(
+                {namespace="weysure-prod", container="api-worker"}
+                  |= `wallet reconciliation: `
+                [75m]
+              )
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "The wallet reconciliation check has not run for 75 minutes"
+              description: "api-worker logs one `wallet reconciliation:` line every 30 min. None for 75 min means the check stopped: WALLET_RECONCILIATION_SCHEDULER_ENABLED is off on api-worker, the wallet.reconciliation job is disabled or cancelled, or the worker is down. While it is silent, WalletLotDrift cannot fire either."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#walletreconciliationmissing
