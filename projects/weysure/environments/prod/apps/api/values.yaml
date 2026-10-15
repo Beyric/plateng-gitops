@@ -143,7 +143,14 @@ components:
     enabled: true
     replicas: 1
     vaultAgent: true
-    env: *commonEnv
+    # Weysure-API #68: the reconciliation loop runs here as one recurring job
+    # (wallet.reconciliation). Set before #68 deploys; the older worker ignores it.
+    # Same values as api-scheduler, which keeps them until #68 is confirmed live.
+    env:
+      <<: *commonEnv
+      WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"
+      WALLET_RECONCILIATION_INTERVAL_MINUTES: "30"
+      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"   # alert: platform/monitoring/loki-rules-wallet.yaml
     # No port: no Service, no readiness, no preStop sleep.
     # The image's CMD (/opt/run.sh) starts gunicorn, so the worker replaces it and
     # does the Vault step run.sh does: wait for the rendered credential, export it.
