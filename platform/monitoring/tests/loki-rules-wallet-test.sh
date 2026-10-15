@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 LOKI_IMAGE=${LOKI_IMAGE:-grafana/loki:3.6.11}
 AM_IMAGE=${AM_IMAGE:-quay.io/prometheus/alertmanager:v0.28.1}
-SCENARIOS="drift fromapi clean expired otherevent"
+SCENARIOS="drift fromapi fromworker clean expired otherevent"
 W=$(mktemp -d); NET=loki-rules-wallet-test-$$
 cleanup(){ docker rm -f lrw-am-$$ $(for s in $SCENARIOS; do echo lrw-$s-$$; done) >/dev/null 2>&1 || true; docker network rm $NET >/dev/null 2>&1 || true; rm -rf "$W"; }
 trap cleanup EXIT
@@ -62,6 +62,7 @@ for m in range(60,-1,-1):                       # health noise every minute for 
         streams.setdefault(c,[]).append(line(now-m*60,"GET /api/v1/health completed in 0.0011s with status 200"))
 if scenario=="drift":      streams["api-scheduler"]+= [drift(now-32*60,2), drift(now-2*60,3)]   # two runs, max wins
 if scenario=="fromapi":    streams["api"].append(drift(now-60,1))                               # admin reconcile by hand
+if scenario=="fromworker": streams.setdefault("api-worker",[]).append(drift(now-60,2))        # #68: periodic run as a worker job
 if scenario=="expired":    streams["api-scheduler"].append(drift(now-50*60,4))                  # older than the 35m window
 if scenario=="otherevent": streams["api-scheduler"].append(drift(now-60,5,event="jobs_stats"))  # same shape, other event
 for v in streams.values(): v.sort()
@@ -79,6 +80,7 @@ for g in json.load(sys.stdin)['data']['groups']:
         print(f\"{r['name']}={r['state']}\"+(f'({float(v):g})' if v else ''))"; }
 want_drift="WalletLotDrift=firing(3)"
 want_fromapi="WalletLotDrift=firing(1)"
+want_fromworker="WalletLotDrift=firing(2)"
 want_clean="WalletLotDrift=inactive"
 want_expired="WalletLotDrift=inactive"
 want_otherevent="WalletLotDrift=inactive"
