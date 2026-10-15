@@ -1,0 +1,79 @@
+# Log-based alerts for the Paystack webhook (Weysure-API #69, live 2026-10-15 as image 28e48768d0cd).
+# Evaluated by the Loki ruler (bootstrap/apps/loki.yaml), routed by the same
+# Alertmanager as Prometheus; same layout as loki-rules-withdrawals.yaml.
+#
+# Source: app/api/v1/endpoints/wallet.py and the access-log middleware (app/main.py), on container api:
+#   ... | WARNING  | app.api.v1.endpoints.wallet:_refuse_untrusted:... - paystack webhook: signature/mode mismatch event=charge.success flow=wallet_topup signed_by=developer_test
+#   ... | WARNING  | app.api.v1.endpoints.wallet:_handle_paystack_webhook:... - [PAYSTACK WEBHOOK] Signature verification failed
+#   ... | INFO     | app.main:logging_middleware:82 - POST /api/v1/wallet/paystack/webhook completed in 0.3591s with status 503
+# - mismatch: a real signature from a key that may not speak for that flow (test key on wallet
+#   money or a production escrow, or a body whose Paystack domain is not the key's mode). Either a
+#   forgery attempt with a leaked key or a misconfigured key. The API also raises one admin
+#   notification per hour (paystack_webhook_mismatch).
+# - signature failed: no configured key signed the body. A burst means prod holds a key Paystack no
+#   longer uses (key rolled in the dashboard, Vault not updated): every webhook is then answered 200
+#   and dropped, so Paystack does not redeliver. Single hits can be scanners.
+# - 503: Paystack could not be asked to confirm a payment or transfer; nothing changed and Paystack
+#   redelivers. A burst means api-egress or Paystack is down and credits are delayed.
+#
+# One-shot events, so count_over_time, not a level, and no `for:`. sum() drops stream labels: one
+# page per alert name. Values are event counts in the window; the details are in Loki (runbook).
+# platform-sleep.sh silences every alert in Alertmanager, these included.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-paystack
+  namespace: monitoring
+  labels: { loki_rule: "1" }
+  annotations:
+    # auth_enabled: false -> single tenant "fake" -> /rules/fake/<file>
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  paystack.yaml: |
+    groups:
+      - name: weysure.paystack
+        interval: 1m
+        rules:
+          - alert: PaystackWebhookKeyMismatch
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container="api"}
+                    |= `paystack webhook: signature/mode mismatch`
+                  [30m]
+                )
+              ) > 0
+            labels: { severity: critical, namespace: weysure-prod }
+            annotations:
+              summary: "A Paystack webhook was signed by a key that may not speak for that flow"
+              description: "{{ $value }} webhook(s) in 30 min carried a valid signature from the wrong key class (for example the test key on wallet money) and were refused; no money moved. Either someone holds a leaked key and is forging events, or a key is misconfigured. Resolves by itself 30 min after the last refusal."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#paystackwebhookkeymismatch
+          - alert: PaystackWebhookSignatureFailing
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container="api"}
+                    |= `[PAYSTACK WEBHOOK] Signature verification failed`
+                  [30m]
+                )
+              ) >= 3
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "Paystack webhooks are failing signature checks"
+              description: "{{ $value }} webhook(s) in 30 min matched no configured Paystack key and were dropped (answered 200, so Paystack does not redeliver). If real payments are among them, prod holds a stale key: compare the Paystack dashboard key with Vault secret/weysure/prod. Otherwise it is junk traffic."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#paystackwebhooksignaturefailing
+          - alert: PaystackWebhookVerifyUnavailable
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container="api"}
+                    |= `POST /api/v1/wallet/paystack/webhook completed`
+                    |= `with status 503`
+                  [30m]
+                )
+              ) >= 3
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "The API cannot reach Paystack to confirm webhook payments"
+              description: "{{ $value }} webhook(s) in 30 min were answered 503 because Paystack could not be asked to confirm the payment or transfer. Nothing was credited; Paystack redelivers, so credits and withdrawal outcomes are delayed, not lost. Check api-egress and the Paystack status page."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#paystackwebhookverifyunavailable
