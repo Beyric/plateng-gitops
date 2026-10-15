@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 LOKI_IMAGE=${LOKI_IMAGE:-grafana/loki:3.6.11}
 AM_IMAGE=${AM_IMAGE:-quay.io/prometheus/alertmanager:v0.28.1}
-SCENARIOS="drift fromapi fromworker clean expired otherevent"
+SCENARIOS="drift fromapi fromworker clean expired otherevent reconok reconold reconapi reconfailed"
 W=$(mktemp -d); NET=loki-rules-wallet-test-$$
 cleanup(){ docker rm -f lrw-am-$$ $(for s in $SCENARIOS; do echo lrw-$s-$$; done) >/dev/null 2>&1 || true; docker network rm $NET >/dev/null 2>&1 || true; rm -rf "$W"; }
 trap cleanup EXIT
@@ -63,6 +63,12 @@ for m in range(60,-1,-1):                       # health noise every minute for 
 if scenario=="drift":      streams["api-scheduler"]+= [drift(now-32*60,2), drift(now-2*60,3)]   # two runs, max wins
 if scenario=="fromapi":    streams["api"].append(drift(now-60,1))                               # admin reconcile by hand
 if scenario=="fromworker": streams.setdefault("api-worker",[]).append(drift(now-60,2))        # #68: periodic run as a worker job
+def recon(t,txt="wallet reconciliation: 1 users, 0 mismatches"):
+    return line(t,txt,"INFO    ","app.worker.handlers.wallet_reconciliation:handle_wallet_reconciliation:51")
+if scenario=="reconok":     streams.setdefault("api-worker",[]).extend([recon(now-40*60),recon(now-10*60)])   # healthy: every 30 min
+if scenario=="reconold":    streams.setdefault("api-worker",[]).append(recon(now-80*60))                       # last run 80 min ago
+if scenario=="reconapi":    streams["api"].append(recon(now-10*60))                                            # wrong container
+if scenario=="reconfailed": streams.setdefault("api-worker",[]).append(recon(now-10*60,"wallet reconciliation failed: OperationalError: x"))
 if scenario=="expired":    streams["api-scheduler"].append(drift(now-50*60,4))                  # older than the 35m window
 if scenario=="otherevent": streams["api-scheduler"].append(drift(now-60,5,event="jobs_stats"))  # same shape, other event
 for v in streams.values(): v.sort()
@@ -74,24 +80,34 @@ done
 echo "waiting for the ruler (no for:, so firing on the first evaluation) ..."
 state(){ curl -s "http://127.0.0.1:$(port lrw-$1-$$ 3100)/prometheus/api/v1/rules" | python3 -c "
 import json,sys
+out=[]
 for g in json.load(sys.stdin)['data']['groups']:
     for r in g['rules']:
         v=' '.join(a['value'] for a in r.get('alerts',[]))
-        print(f\"{r['name']}={r['state']}\"+(f'({float(v):g})' if v else ''))"; }
-want_drift="WalletLotDrift=firing(3)"
-want_fromapi="WalletLotDrift=firing(1)"
-want_fromworker="WalletLotDrift=firing(2)"
-want_clean="WalletLotDrift=inactive"
-want_expired="WalletLotDrift=inactive"
-want_otherevent="WalletLotDrift=inactive"
+        out.append(f\"{r['name']}={r['state']}\"+(f'({float(v):g})' if v else ''))
+print(' '.join(out))"; }
+want_drift="WalletLotDrift=firing(3) WalletReconciliationMissing=firing(1)"
+want_fromapi="WalletLotDrift=firing(1) WalletReconciliationMissing=firing(1)"
+want_fromworker="WalletLotDrift=firing(2) WalletReconciliationMissing=firing(1)"
+want_clean="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
+want_expired="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
+want_reconok="WalletLotDrift=inactive WalletReconciliationMissing=inactive"
+want_reconold="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
+want_reconapi="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
+want_reconfailed="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
+want_otherevent="WalletLotDrift=inactive WalletReconciliationMissing=firing(1)"
 for i in $(seq 1 18); do
   ok=1; for s in $SCENARIOS; do w=want_$s; [[ "$(state $s)" == "${!w}" ]] || ok=0; done
   [[ $ok == 1 ]] && break; sleep 10
 done
 fail=0
 for s in $SCENARIOS; do got=$(state $s); w=want_$s; if [[ "$got" == "${!w}" ]]; then echo "PASS $s: $got"; else echo "FAIL $s: got '$got', want '${!w}'"; fail=1; fi; done
-recv=$(curl -s "http://127.0.0.1:$(port lrw-am-$$ 9093)/api/v2/alerts" | python3 -c "import json,sys; print(' '.join(sorted(f\"{a['labels']['alertname']}/{a['labels']['severity']}\" for a in json.load(sys.stdin))))")
-# Both firing scenarios carry the same labels (max() drops stream labels), so Alertmanager
-# holds them as ONE alert, which is what prod should do too: one page, not one per container.
-if [[ "$recv" == "WalletLotDrift/critical" ]]; then echo "PASS alertmanager received: $recv"; else echo "FAIL alertmanager received: '$recv'"; fail=1; fi
+want_recv="WalletLotDrift/critical WalletReconciliationMissing/warning"
+for i in $(seq 1 12); do   # the ruler sends each alert on its next evaluation: allow ~2 min
+  recv=$(curl -s "http://127.0.0.1:$(port lrw-am-$$ 9093)/api/v2/alerts" | python3 -c "import json,sys; print(' '.join(sorted(f\"{a['labels']['alertname']}/{a['labels']['severity']}\" for a in json.load(sys.stdin))))")
+  [[ "$recv" == "$want_recv" ]] && break; sleep 10
+done
+# Firing scenarios carry the same labels (max()/absent_over_time drop stream labels), so
+# Alertmanager holds ONE alert per name, which is what prod should do too: one page each.
+if [[ "$recv" == "$want_recv" ]]; then echo "PASS alertmanager received: $recv"; else echo "FAIL alertmanager received: '$recv'"; fail=1; fi
 exit $fail
