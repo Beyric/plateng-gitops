@@ -41,10 +41,20 @@ spec:
       nodeSelector: {{- toYaml $.Values.nodeSelector | nindent 8 }}
       securityContext: {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ $c.terminationGracePeriodSeconds | default 30 }}
+      {{- $ts := $c.topologySpread | default dict }}
+      {{- if and $ts.minDomains (ne ($ts.whenUnsatisfiable | default "") "DoNotSchedule") }}
+      {{- fail (printf "%s: topologySpread.minDomains needs whenUnsatisfiable: DoNotSchedule" $name) }}
+      {{- end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: {{ ($c.topologySpread | default dict).whenUnsatisfiable | default "ScheduleAnyway" }}
+          whenUnsatisfiable: {{ $ts.whenUnsatisfiable | default "ScheduleAnyway" }}
+          {{- with $ts.minDomains }}
+          # Fewer eligible nodes than this = the missing ones count as empty, so the
+          # next replica waits (Pending) and Karpenter adds a node, instead of one
+          # eligible node looking "balanced" with every replica on it.
+          minDomains: {{ . }}
+          {{- end }}
           # Count only nodes this pod may run on (a node whose taint it does not
           # tolerate is not an empty "domain" it must fill), and only this
           # ReplicaSet's pods, so a rollout spreads the new pods among themselves.
