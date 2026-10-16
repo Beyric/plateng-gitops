@@ -96,6 +96,15 @@ spec:
               // Applies to every namespace, so a future leak elsewhere is covered too.
               loki.process "redact" {
                 forward_to = [loki.write.default.receiver]
+                // Deal-invite links carry their token as a path segment: API
+                // /api/v1/invites/<token>[/claim|/decline] and the web page /invite/<token>,
+                // also in Referer fields. Redacted by position, not by shape, so a change
+                // of token format (JWT today, Weysure-API #75) cannot reopen the leak.
+                // Same output as the app's own access-log filter (app/core/log_redaction.py).
+                stage.replace {
+                  expression = `(?:/api/v1/invites/|/invite/)([^/?#\s"']+)`
+                  replace    = "{token}"
+                }
                 stage.replace {
                   expression = `(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+)`
                   replace    = "<redacted-jwt>"
