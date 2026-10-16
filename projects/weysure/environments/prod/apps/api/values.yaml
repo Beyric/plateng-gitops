@@ -30,6 +30,11 @@ migration:
   # alembic no longer imports the application's Settings, so the Job carries no
   # SECRET_KEY and no app config. Proven 2026-10-01 on the deployed commit:
   # 49 migrations from an empty database with DATABASE_URL as the only variable.
+  # 15 min (chart default 10). Weysure-API #75 builds ix_users_lower_email with
+  # CREATE INDEX CONCURRENTLY: up to 300 s waiting on older transactions plus the
+  # build. A kill mid-build leaves an INVALID index and a failed PreSync (backoff 0).
+  # Stays well inside the weysure-migrate Vault lease (ttl 30m).
+  activeDeadlineSeconds: 900
 
 # Non-secret configuration shared by the API workloads (api, api-scheduler, api-worker).
 commonEnv: &commonEnv
