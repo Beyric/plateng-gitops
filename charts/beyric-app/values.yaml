@@ -63,6 +63,7 @@ components: {}
 #    hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, cpu: 70 }
 #    pdb: { enabled: false, minAvailable: 1 }
 #    topologySpread: { whenUnsatisfiable: ScheduleAnyway }   # DoNotSchedule = replicas never share a node
+#                    # + minDomains: N (DoNotSchedule only) = keep at least N eligible nodes
 #    terminationGracePeriodSeconds: 30
 #    preStopSleep: 5
 #    vaultAgent: false

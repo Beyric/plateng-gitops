@@ -65,6 +65,8 @@ check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAs
 for docs,n,want in ((api,'api','DoNotSchedule'),(web,'web','DoNotSchedule'),(api,'api-scheduler','ScheduleAnyway'),(api,'api-worker','ScheduleAnyway')):
     t=one(docs,'Deployment',n)['spec']['template']['spec']['topologySpreadConstraints'][0]
     check(t['whenUnsatisfiable']==want and t['topologyKey']=='kubernetes.io/hostname' and t['matchLabelKeys']==['pod-template-hash'] and t['nodeTaintsPolicy']=='Honor', f'{n}: hostname spread {want}, per ReplicaSet, taints honoured')
+    md = 2 if want=='DoNotSchedule' else None
+    check(t.get('minDomains')==md, f'{n}: minDomains {md}')
 check(job['spec']['backoffLimit']==0 and job['spec']['template']['spec']['serviceAccountName']=='db-migrate', 'migration job SA + no retries')
 es=one(api,'ExternalSecret','weysure-app-config'); check(es['metadata']['annotations'].get('argocd.argoproj.io/hook')=='PreSync' and es['metadata']['annotations'].get('argocd.argoproj.io/sync-wave')=='-2', 'ExternalSecret is a PreSync hook before the migration Job'); check(es['spec']['dataFrom'][0]['extract']['key']=='weysure/prod' and es['spec']['secretStoreRef']['name']=='vault', 'ExternalSecret from weysure/prod')
 ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='weysure-api.beyrictech.com' and ing['metadata']['annotations']['cert-manager.io/cluster-issuer']=='letsencrypt-prod', 'api ingress + cert')

@@ -28,5 +28,8 @@ components:
     # Never two replicas on one node (2026-10-13): with the default soft rule all
     # api and web pods sat on one spot node, so one spot interruption took both
     # sites down at once. Karpenter adds a node when no second one has room.
-    topologySpread: { whenUnsatisfiable: DoNotSchedule }
+    # minDomains 2 (2026-10-16): the rule counts only nodes the pod may use
+    # (node-role=workload). After Karpenter consolidated down to one workload
+    # node, one node was "balanced" and all replicas sat on it again.
+    topologySpread: { whenUnsatisfiable: DoNotSchedule, minDomains: 2 }
     writableDirs: [/tmp, /app/.next/cache]
