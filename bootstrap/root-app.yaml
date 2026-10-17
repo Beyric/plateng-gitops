@@ -17,9 +17,21 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
+  # Argo CD (3.x) adds pre-delete-finalizer.argocd.argoproj.io[/cleanup] to any child Application whose
+  # chart has PreDelete hooks (kyverno 3.9.1 does), so the hooks run before the app is deleted. They are
+  # Argo's, not ours: without this, root self-heals them away every 5 min, the controller re-adds them,
+  # and root stays OutOfSync for ever (seen 2026-10-17, from 11:41 UTC). Only these entries are ignored;
+  # resources-finalizer and everything else on the child Applications are still compared.
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Application
+      jqPathExpressions:
+        - '.metadata.finalizers[]? | select(startswith("pre-delete-finalizer.argocd.argoproj.io"))'
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Keep the live value of the ignored entries when root syncs, so a sync no longer strips them.
+      - RespectIgnoreDifferences=true
