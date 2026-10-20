@@ -20,6 +20,12 @@ spec:
         # unnecessary - and Kyverno will forbid privileged in Phase 8.
         initSysctl: { enabled: false }
         nodeSelector: { node-role: workload }
+        # Karpenter consolidation must not move SonarQube: a restart mid-scan fails
+        # every running PR build's Quality gate (`Connection refused`, PR-107 #1 on
+        # 2026-10-20). Same guard as redis-0. Blocks voluntary disruption only -
+        # spot interruption and expireAfter still apply. Kept on Karpenter, not the
+        # system nodes: those lack the vm.max_map_count userData above.
+        annotations: { karpenter.sh/do-not-disrupt: "true" }
         postgresql: { enabled: false }
         jdbcOverwrite:
           enable: true
