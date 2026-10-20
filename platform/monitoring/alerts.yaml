@@ -176,6 +176,18 @@ spec:
             summary: "No Ready workload node for 10 minutes"
             description: "Expected while the platform is asleep. Otherwise Karpenter cannot provision: check its logs, the NodePool limits and spot capacity."
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#noworkloadnode
+        - alert: KarpenterNodeStuckDraining
+          # Karpenter taints a node it is removing with karpenter.sh/disrupted. A
+          # do-not-disrupt pod (redis-0, SonarQube, sonar-postgres) is never evicted,
+          # and the NodePool has no terminationGracePeriod (deliberate, 2026-10-20), so
+          # an expired node waits for a person. Normal drains: <= ~20 min (44 in 7 days).
+          expr: max by (node) (kube_node_spec_taint{key="karpenter.sh/disrupted"}) == 1
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.node }} has been draining for over 1 hour"
+            description: "A pod Karpenter will not evict (karpenter.sh/do-not-disrupt) is holding the node. Delete that pod at a quiet moment (no build in its Sonar stage) so it reschedules and the node can go."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#karpenternodestuckdraining
     - name: beyric.lifecycle
       rules:
         - alert: EKSEndOfStandardSupportApproaching
