@@ -55,6 +55,11 @@ spec:
             - sonar
             - job-dsl
             - junit   # test report publishing; the pipelines' post { junit } step
+            # lock(resource: 'sonar-weysure-<app>-pr') around the PR builds' base scan + PR scan, so
+            # no other PR's analysis lands between them in the shared -pr Sonar project (2026-10-20
+            # proposal). Resources are created on first lock(); nothing to configure. Adding a plugin
+            # restarts the controller: merge only when no build is running.
+            - lockable-resources
           # installLatestPlugins resolves the transitive dependency graph against
           # the running core. With it off and unversioned names, token-macro
           # failed to load and took github, github-branch-source and the whole
