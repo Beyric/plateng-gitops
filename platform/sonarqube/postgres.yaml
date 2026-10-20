@@ -17,7 +17,11 @@ spec:
   replicas: 1
   selector: { matchLabels: { app: sonar-postgres } }
   template:
-    metadata: { labels: { app: sonar-postgres } }
+    metadata:
+      labels: { app: sonar-postgres }
+      # SonarQube cannot serve a scan while its database moves nodes; see the
+      # matching annotation in bootstrap/apps/sonarqube.yaml.
+      annotations: { karpenter.sh/do-not-disrupt: "true" }
     spec:
       nodeSelector: { node-role: workload }
       securityContext: { runAsNonRoot: true, runAsUser: 70, runAsGroup: 70, fsGroup: 70 }
