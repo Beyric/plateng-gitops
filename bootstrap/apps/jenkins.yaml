@@ -41,6 +41,11 @@ spec:
             - { name: jenkins-github-app, keyName: private_key }
             - { name: jenkins-platform, keyName: webhook_secret }
             - { name: jenkins-platform, keyName: sonar_token }
+            # PR builds only: deletes + recreates the weysure-<app>-pr Sonar projects and selects the
+            # weysure-pr gate before the base scan, so a PR scan never sees another PR's history (an
+            # issue seen before is reopened with its old date and is not "new"). SonarQube user
+            # jenkins-sonar-pr: global Create Projects only + Administer on projects it creates.
+            - { name: jenkins-platform, keyName: sonar_pr_admin_token }
             # Read-only developer logins (Vault secret/platform/jenkins-users).
             - { name: jenkins-dev-users, keyName: innocent98 }
           installPlugins:
@@ -121,6 +126,10 @@ spec:
                               id: sonar-token
                               description: "SonarQube global analysis token"
                               secret: "${jenkins-platform-sonar_token}"
+                          - string:
+                              id: sonar-pr-admin-token
+                              description: "SonarQube jenkins-sonar-pr user token - recreate -pr projects (PR builds)"
+                              secret: "${jenkins-platform-sonar_pr_admin_token}"
               github: |
                 unclassified:
                   gitHubPluginConfig:
