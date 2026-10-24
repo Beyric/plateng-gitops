@@ -40,9 +40,12 @@ vaultAgent:
   # namespace so it can SIGTERM the server; the container restarts and the
   # entrypoint sources the new file. `[b]in` keeps pkill from matching itself.
   restartCommand: sh -c "pkill -TERM -f '[b]in/gunicorn' || true"
+  # The CPU limit must be explicit: without the agent-limits-cpu annotation the injector
+  # applies its own 500m, which the namespace quota counts (4 sidecars = 2 CPU of limits for
+  # ~1m of use each; it blocked rollout surges, 2026-10-24).
   resources:
     requests: { cpu: 20m, memory: 32Mi }
-    limits: { memory: 64Mi }
+    limits: { cpu: 100m, memory: 64Mi }
 
 components: {}
 #  api:

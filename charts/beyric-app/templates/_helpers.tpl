@@ -30,6 +30,9 @@ vault.hashicorp.com/agent-inject-template-{{ $v.fileName }}: |
   {{`{{- with secret "`}}{{ .credsPath }}{{`" -}}`}}
   DATABASE_URL=postgresql://{{`{{ .Data.username }}`}}:{{`{{ .Data.password }}`}}@{{ $v.dbHost }}:{{ $v.dbPort }}/{{ $v.dbName }}?sslmode={{ $v.sslmode }}
   {{`{{- end }}`}}
+{{- with $v.resources.limits.cpu }}
+vault.hashicorp.com/agent-limits-cpu: {{ . | quote }}
+{{- end }}
 vault.hashicorp.com/agent-limits-mem: {{ $v.resources.limits.memory | quote }}
 vault.hashicorp.com/agent-requests-cpu: {{ $v.resources.requests.cpu | quote }}
 vault.hashicorp.com/agent-requests-mem: {{ $v.resources.requests.memory | quote }}

@@ -19,6 +19,9 @@ api, web = load('/tmp/beyric-app-api.yaml'), load('/tmp/beyric-app-web.yaml')
 def one(docs, kind, name):
     m=[d for d in docs if d['kind']==kind and d['metadata']['name']==name]; assert len(m)==1, f"{kind}/{name}: {len(m)}"; return m[0]
 fails=[]
+def ja_sidecar_ok(docs):
+    ds=[d for d in docs if d['kind']=='Deployment' and d['spec']['template']['metadata'].get('annotations',{}).get('vault.hashicorp.com/agent-inject')=='true']
+    return len(ds)==3 and all(d['spec']['template']['metadata']['annotations'].get('vault.hashicorp.com/agent-limits-cpu')=='100m' for d in ds)
 def check(cond, msg):
     if not cond: fails.append(msg)
 images = yaml.safe_load(open('projects/weysure/environments/prod/images.yaml'))
@@ -29,6 +32,8 @@ a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
 check('agent-pre-populate-only' not in str(a) and a.get('vault.hashicorp.com/agent-pre-populate')=='false', 'api uses sidecar only (single lease)')
 check('sslmode=require' in a['vault.hashicorp.com/agent-inject-template-env'] and '{{ .Data.password }}' in a['vault.hashicorp.com/agent-inject-template-env'], 'DATABASE_URL template renders creds with sslmode')
+check(a.get('vault.hashicorp.com/agent-limits-cpu')=='100m' and a.get('vault.hashicorp.com/agent-requests-cpu')=='20m', 'api vault agent has an explicit CPU limit (else the injector applies 500m)')
+check(ja_sidecar_ok(api), 'every vault-agent sidecar pod (api, scheduler, worker) sets agent-limits-cpu')
 check(pod['spec'].get('shareProcessNamespace') is True, 'api shares PID namespace for restart-on-rotate')
 check(c['securityContext']['readOnlyRootFilesystem'] and pod['spec']['securityContext']['runAsNonRoot'] and c['securityContext']['runAsUser']==1000, 'api non-root read-only, container runAsUser set')
 check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)') if False else None
