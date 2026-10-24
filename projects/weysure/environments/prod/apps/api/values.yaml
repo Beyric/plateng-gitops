@@ -129,8 +129,12 @@ components:
     # The application writes nothing to disk (Weysure-API #14: logs to stdout;
     # #16: uploads to Cloudinary), so /tmp is the only writable path left.
     writableDirs: [/tmp]
+  # Idle since Weysure-API #68 (live 2026-10-15): the reconciliation loop moved to api-worker as the
+  # wallet.reconciliation job, and app/main.py starts no timer. This pod only ran a second, unrouted
+  # copy of the API (no Service). Stopped in git 2026-10-24 (developers' note 2026-10-24-scheduler-overlap);
+  # rollback = replicas: 1. Remove the component once Train 1b and Train 2 are live.
   api-scheduler:
-    replicas: 1
+    replicas: 0
     vaultAgent: true
     env:
       <<: *commonEnv

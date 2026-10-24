@@ -55,7 +55,7 @@ for n in ('api-config','api-scheduler-config','api-worker-config'):
     d=one(api,'ConfigMap',n)['data']
     check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='off' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds off, trusted proxy = VPC')
     check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
-check(one(api,'Deployment','api-scheduler')['spec']['replicas']==1, 'scheduler single replica')
+check(one(api,'Deployment','api-scheduler')['spec']['replicas']==0, 'scheduler stopped in git (idle since Weysure-API #68), renders 0 not the default 1')
 check(not [d for d in api if d['kind']=='Service' and d['metadata']['name']=='api-scheduler'], 'scheduler has no Service')
 job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadata']['annotations']
 check(job['metadata']['annotations']['argocd.argoproj.io/hook']=='PreSync' and 'HookSucceeded' in job['metadata']['annotations']['argocd.argoproj.io/hook-delete-policy'], 'migration job is a PreSync hook')
