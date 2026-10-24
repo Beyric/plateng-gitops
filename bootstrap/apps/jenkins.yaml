@@ -158,6 +158,11 @@ spec:
                               gitHubBranchDiscovery { strategyId(1) }
                               gitHubPullRequestDiscovery { strategyId(1) }
                               sourceRegexFilter { regex('Weysure-API|Weysure') }
+                              // Build only main, release/* and PRs (PR-<n>). Strategy 1 excludes a branch only while
+                              // its PR is open: once the PR closes the branch is a plain branch again and got a
+                              // build #1 on the next scan - Train 1b closed 5 PRs and launched 5 stale builds at once
+                              // (2026-10-24, blocked the main deploy ~55 min on us-east-1b prefix space).
+                              headWildcardFilter { includes('main release/* PR-*'); excludes('') }
                             }
                           }
                         }
