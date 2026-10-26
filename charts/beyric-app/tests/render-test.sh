@@ -21,7 +21,7 @@ def one(docs, kind, name):
 fails=[]
 def ja_sidecar_ok(docs):
     ds=[d for d in docs if d['kind']=='Deployment' and d['spec']['template']['metadata'].get('annotations',{}).get('vault.hashicorp.com/agent-inject')=='true']
-    return len(ds)==3 and all(d['spec']['template']['metadata']['annotations'].get('vault.hashicorp.com/agent-limits-cpu')=='100m' for d in ds)
+    return len(ds)==2 and all(d['spec']['template']['metadata']['annotations'].get('vault.hashicorp.com/agent-limits-cpu')=='100m' for d in ds)
 def check(cond, msg):
     if not cond: fails.append(msg)
 images = yaml.safe_load(open('projects/weysure/environments/prod/images.yaml'))
@@ -33,16 +33,16 @@ check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashico
 check('agent-pre-populate-only' not in str(a) and a.get('vault.hashicorp.com/agent-pre-populate')=='false', 'api uses sidecar only (single lease)')
 check('sslmode=require' in a['vault.hashicorp.com/agent-inject-template-env'] and '{{ .Data.password }}' in a['vault.hashicorp.com/agent-inject-template-env'], 'DATABASE_URL template renders creds with sslmode')
 check(a.get('vault.hashicorp.com/agent-limits-cpu')=='100m' and a.get('vault.hashicorp.com/agent-requests-cpu')=='20m', 'api vault agent has an explicit CPU limit (else the injector applies 500m)')
-check(ja_sidecar_ok(api), 'every vault-agent sidecar pod (api, scheduler, worker) sets agent-limits-cpu')
+check(ja_sidecar_ok(api), 'every vault-agent sidecar pod (api, worker) sets agent-limits-cpu')
 check(pod['spec'].get('shareProcessNamespace') is True, 'api shares PID namespace for restart-on-rotate')
 check(c['securityContext']['readOnlyRootFilesystem'] and pod['spec']['securityContext']['runAsNonRoot'] and c['securityContext']['runAsUser']==1000, 'api non-root read-only, container runAsUser set')
 check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)') if False else None
 check(c['readinessProbe']['httpGet']['path']=='/api/v1/health' and c['startupProbe']['failureThreshold']==30, 'api probes')
 check({'configMapRef': {'name': 'api-config'}} in c['envFrom'] and {'secretRef': {'name': 'weysure-app-config'}} in c['envFrom'], 'api envFrom configmap + secret')
 cm=one(api,'ConfigMap','api-config')['data']; check(cm['RUN_MIGRATIONS']=='false' and cm['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='false', 'api config: no migrations, no scheduler')
-sch=one(api,'ConfigMap','api-scheduler-config')['data']; check(sch['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='true' and sch['REDIS_URL']==cm['REDIS_URL'], 'scheduler config inherits common env, enables scheduler')
+wk=one(api,'ConfigMap','api-worker-config')['data']; check(wk['WALLET_RECONCILIATION_SCHEDULER_ENABLED']=='true' and wk['REDIS_URL']==cm['REDIS_URL'], 'worker config inherits common env, runs the reconciliation (Weysure-API #68)')
 kyc=['TERMII_BASE_URL','TERMII_SENDER_ID','TERMII_OTP_CHANNEL','TERMII_OTP_TEMPLATE','OTP_EXPIRE_MINUTES','OTP_RESEND_COOLDOWN_SECONDS','OTP_RESEND_DAILY_CAP','DOJAH_ENVIRONMENT','DOJAH_BASE_URL','DOJAH_APP_ID','DOJAH_PUBLIC_KEY','DOJAH_BVN_WIDGET_ID','DOJAH_NIN_WIDGET_ID','DOJAH_FACE_MATCH_THRESHOLD']
-for name,data in (('api',cm),('api-scheduler',sch)):
+for name,data in (('api',cm),('api-worker',wk)):
     check(all(data.get(k) for k in kyc), f'{name}: all 14 KYC config values present and non-empty')
     check(data.get('TERMII_SENDER_ID')=='N-Alert', f'{name}: Termii sender ID in its registered case')
     check('{code}' in data.get('TERMII_OTP_TEMPLATE','') and data.get('OTP_EXPIRE_MINUTES')=='10', f'{name}: OTP template keeps {{code}} and the approved 10 minutes')
@@ -51,23 +51,22 @@ for name,data in (('api',cm),('api-scheduler',sch)):
     check(env and env not in ('development','dev','test','testing','local'), f'{name}: ENVIRONMENT set and not one that enables fake providers')
     check(env not in ('production','prod') or (data.get('DOJAH_ENVIRONMENT')=='production' and 'sandbox' not in data.get('DOJAH_BASE_URL','')), f'{name}: production ENVIRONMENT never with Dojah sandbox (the API refuses to boot)')
     check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
-for n in ('api-config','api-scheduler-config','api-worker-config'):
+for n in ('api-config','api-worker-config'):
     d=one(api,'ConfigMap',n)['data']
     check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='off' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds off, trusted proxy = VPC')
     check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
-check(one(api,'Deployment','api-scheduler')['spec']['replicas']==0, 'scheduler stopped in git (idle since Weysure-API #68), renders 0 not the default 1')
-check(not [d for d in api if d['kind']=='Service' and d['metadata']['name']=='api-scheduler'], 'scheduler has no Service')
+check(not [d for d in api if d['metadata']['name'].startswith('api-scheduler')], 'api-scheduler removed (2026-10-26): no Deployment, ConfigMap, ServiceAccount or Service')
 job=one(api,'Job','weysure-api-db-migrate'); ja=job['spec']['template']['metadata']['annotations']
 check(job['metadata']['annotations']['argocd.argoproj.io/hook']=='PreSync' and 'HookSucceeded' in job['metadata']['annotations']['argocd.argoproj.io/hook-delete-policy'], 'migration job is a PreSync hook')
 check(ja.get('vault.hashicorp.com/agent-pre-populate-only')=='true' and ja.get('vault.hashicorp.com/role')=='weysure-migrate', 'migration uses init-only agent with migrate role')
 sa=one(api,'ServiceAccount','db-migrate')['metadata']['annotations']; check(sa.get('argocd.argoproj.io/hook')=='PreSync' and sa.get('argocd.argoproj.io/sync-wave')=='-1', 'migration SA is a PreSync hook before the Job')
 jc=job['spec']['template']['spec']['containers'][0]; jenv={e['name']:e.get('value') for e in jc['env']}; check(list(jenv)==['VAULT_ENV_FILE'], 'migration job env is VAULT_ENV_FILE only')
 check('envFrom' not in jc, 'migration job mounts no application secret (no SECRET_KEY)')
-for n in ('api','api-scheduler'):
+for n in ('api',):
     pc=one(api,'Deployment',n)['spec']['template']['spec']; mounts=sorted(m['mountPath'] for m in pc['containers'][0].get('volumeMounts',[]) if not m['mountPath'].startswith('/vault'))
     check(mounts==['/tmp'], f'{n}: /tmp is the only writable path, got {mounts}')
 check(job['spec']['template']['spec']['containers'][0]['securityContext']['runAsUser']==1000, 'migration container runAsUser set (injector run-as-same-user)')
-for docs,n,want in ((api,'api','DoNotSchedule'),(web,'web','DoNotSchedule'),(api,'api-scheduler','ScheduleAnyway'),(api,'api-worker','ScheduleAnyway')):
+for docs,n,want in ((api,'api','DoNotSchedule'),(web,'web','DoNotSchedule'),(api,'api-worker','ScheduleAnyway')):
     t=one(docs,'Deployment',n)['spec']['template']['spec']['topologySpreadConstraints'][0]
     check(t['whenUnsatisfiable']==want and t['topologyKey']=='kubernetes.io/hostname' and t['matchLabelKeys']==['pod-template-hash'] and t['nodeTaintsPolicy']=='Honor', f'{n}: hostname spread {want}, per ReplicaSet, taints honoured')
     md = 2 if want=='DoNotSchedule' else None

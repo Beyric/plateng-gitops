@@ -6,10 +6,10 @@
 # whose open lots do not add up to their wallet_balance:
 #   2026-10-10 00:30:00.123 | ERROR    | app.services.wallet_reconciliation_service:check_lot_invariant:221 - {"event": "wallet_lot_drift", "users": 3}
 # Not rate-limited (the admin inbox notification is). Callers that log it:
-#   - api-scheduler: the periodic reconciliation, every 30 min, until Weysure-API #68;
-#   - api-worker: the same periodic run as the recurring job wallet.reconciliation (#68);
+#   - api-worker: the periodic reconciliation, every 30 min, as the recurring job
+#     wallet.reconciliation (Weysure-API #68; api-scheduler ran it before and was removed 2026-10-26);
 #   - api: an admin running reconcile / repair by hand (full scan afterwards).
-# Hence container=~"api|api-scheduler|api-worker". A clean run logs nothing.
+# Hence container=~"api|api-worker". A clean run logs nothing.
 #
 # Window 35m = one 30-min reconciliation interval + 5 min slack. While drift
 # persists every run logs a fresh line, so the alert stays firing; it clears by
@@ -41,7 +41,7 @@ data:
             expr: |
               max(
                 max_over_time(
-                  {namespace="weysure-prod", container=~"api|api-scheduler|api-worker"}
+                  {namespace="weysure-prod", container=~"api|api-worker"}
                     |= `"event": "wallet_lot_drift"`
                     | regexp `(?P<drift>\{.*\})`
                     | line_format `{{.drift}}`
