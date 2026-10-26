@@ -70,6 +70,12 @@ commonEnv: &commonEnv
   # The VPC: only Traefik (behind the Cloudflare-only NLB, gitops #69) reaches the API.
   # A platform fact, so it lives here, not as a code default. Ignored by earlier images.
   TRUSTED_PROXY_CIDRS: "10.0.0.0/16"
+  # WebSocket auth (Weysure-API #89, web #56): the JWT travels in Sec-WebSocket-Protocol
+  # ["weysure.bearer", "<jwt>"], never in the URL. false refuses any handshake that carries
+  # ?token= (close 1008), so a token never lands in Traefik/uvicorn access logs.
+  # Off since 2026-10-26: web Train 2 (#66) live, connects proven without ?token=,
+  # developers confirmed no other client. Rollback: "true" (code default).
+  WS_ALLOW_URL_TOKEN: "false"
 
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
