@@ -36,7 +36,7 @@ migration:
   # Stays well inside the weysure-migrate Vault lease (ttl 30m).
   activeDeadlineSeconds: 900
 
-# Non-secret configuration shared by the API workloads (api, api-scheduler, api-worker).
+# Non-secret configuration shared by the API workloads (api, api-worker).
 commonEnv: &commonEnv
   # Pre-launch: real infrastructure, test provider keys, data wiped before launch.
   # Not production: from Weysure-API #36 the API refuses to boot with
@@ -129,26 +129,8 @@ components:
     # The application writes nothing to disk (Weysure-API #14: logs to stdout;
     # #16: uploads to Cloudinary), so /tmp is the only writable path left.
     writableDirs: [/tmp]
-  # Idle since Weysure-API #68 (live 2026-10-15): the reconciliation loop moved to api-worker as the
-  # wallet.reconciliation job, and app/main.py starts no timer. This pod only ran a second, unrouted
-  # copy of the API (no Service). Stopped in git 2026-10-24 (developers' note 2026-10-24-scheduler-overlap);
-  # rollback = replicas: 1. Remove the component once Train 1b and Train 2 are live.
-  api-scheduler:
-    replicas: 0
-    vaultAgent: true
-    env:
-      <<: *commonEnv
-      WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"
-      WALLET_RECONCILIATION_INTERVAL_MINUTES: "30"
-      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"   # alert: platform/monitoring/loki-rules-wallet.yaml
-    resources:
-      requests: { cpu: 100m, memory: 384Mi }
-      limits: { cpu: 500m, memory: 768Mi }
-    # single replica: still needs a port for probes -> the API serves them; no Service/Ingress
-    port: 8000
-    service: { enabled: false }
-    probes: { path: /api/v1/health }
-    writableDirs: [/tmp]
+  # api-scheduler removed 2026-10-26: idle since Weysure-API #68 (the reconciliation loop runs in
+  # api-worker as the wallet.reconciliation job), replicas 0 since 2026-10-24 (gitops #89).
   # Background jobs worker (platform note 2026-10-03b): polls the Postgres jobs
   # table with FOR UPDATE SKIP LOCKED, so replicas never share a job. Same image
   # as api (needs Weysure-API #43 or later: app.worker). Switched on 2026-10-05.
@@ -159,8 +141,7 @@ components:
     replicas: 1
     vaultAgent: true
     # Weysure-API #68: the reconciliation loop runs here as one recurring job
-    # (wallet.reconciliation). Set before #68 deploys; the older worker ignores it.
-    # Same values as api-scheduler, which keeps them until #68 is confirmed live.
+    # (wallet.reconciliation), every 30 min.
     env:
       <<: *commonEnv
       WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end test of platform/monitoring/loki-rules-wallet.yaml against a real Loki
 # (same version as the cluster) and a real Alertmanager, in Docker. ~2 minutes.
-# Pushes api-scheduler / api style log lines (loguru prefix + JSON, as logged by
+# Pushes api-worker / api style log lines (loguru prefix + JSON, as logged by
 # wallet_reconciliation_service.check_lot_invariant) backdated over the last hour,
 # lets the ruler evaluate, then checks rule state, value and delivery.
 #   bash platform/monitoring/tests/loki-rules-wallet-test.sh      (from the repo root)
@@ -58,9 +58,9 @@ def drift(t,n,event="wallet_lot_drift"):
     # json.dumps default separators, exactly like check_lot_invariant()
     return line(t,json.dumps({"event":event,"users":n}),"ERROR   ","logging:callHandlers:1706")
 for m in range(60,-1,-1):                       # health noise every minute for an hour
-    for c in ("api","api-scheduler"):
+    for c in ("api","api-worker"):
         streams.setdefault(c,[]).append(line(now-m*60,"GET /api/v1/health completed in 0.0011s with status 200"))
-if scenario=="drift":      streams["api-scheduler"]+= [drift(now-32*60,2), drift(now-2*60,3)]   # two runs, max wins
+if scenario=="drift":      streams["api-worker"]+= [drift(now-32*60,2), drift(now-2*60,3)]   # two runs, max wins
 if scenario=="fromapi":    streams["api"].append(drift(now-60,1))                               # admin reconcile by hand
 if scenario=="fromworker": streams.setdefault("api-worker",[]).append(drift(now-60,2))        # #68: periodic run as a worker job
 def recon(t,txt="wallet reconciliation: 1 users, 0 mismatches"):
@@ -69,8 +69,8 @@ if scenario=="reconok":     streams.setdefault("api-worker",[]).extend([recon(no
 if scenario=="reconold":    streams.setdefault("api-worker",[]).append(recon(now-80*60))                       # last run 80 min ago
 if scenario=="reconapi":    streams["api"].append(recon(now-10*60))                                            # wrong container
 if scenario=="reconfailed": streams.setdefault("api-worker",[]).append(recon(now-10*60,"wallet reconciliation failed: OperationalError: x"))
-if scenario=="expired":    streams["api-scheduler"].append(drift(now-50*60,4))                  # older than the 35m window
-if scenario=="otherevent": streams["api-scheduler"].append(drift(now-60,5,event="jobs_stats"))  # same shape, other event
+if scenario=="expired":    streams["api-worker"].append(drift(now-50*60,4))                  # older than the 35m window
+if scenario=="otherevent": streams["api-worker"].append(drift(now-60,5,event="jobs_stats"))  # same shape, other event
 for v in streams.values(): v.sort()
 body={"streams":[{"stream":{"namespace":"weysure-prod","container":c,"pod":c+"-x"},"values":v} for c,v in streams.items()]}
 req=urllib.request.Request(f"http://127.0.0.1:{port}/loki/api/v1/push",data=json.dumps(body).encode(),headers={"Content-Type":"application/json"})
