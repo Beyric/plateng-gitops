@@ -77,6 +77,14 @@ commonEnv: &commonEnv
   # developers confirmed no other client. Rollback: "true" (code default).
   WS_ALLOW_URL_TOKEN: "false"
 
+  # Live-key auto-pause (Weysure-API #128 A5; the minimum-amount floor on every rule, #129, live
+  # 2026-10-29): off | shadow | enforce. enforce pauses a non-KYB developer's live keys when a rule
+  # fires (velocity / refund ratio / same payer, deals of N5,000 or more); only a superadmin resumes.
+  # Adebayo chose enforce directly on 2026-10-29 (the developers' note suggested shadow first), after
+  # a counts-only pre-switch read. Rollback: "shadow" (logs, pauses nobody) or "off"; keys already
+  # paused stay paused until a superadmin resumes them.
+  LIVE_AUTO_PAUSE_MODE: "enforce"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
