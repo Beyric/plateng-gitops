@@ -74,7 +74,7 @@ for docs,n,want in ((api,'api','DoNotSchedule'),(web,'web','DoNotSchedule'),(api
     check(t.get('minDomains')==md, f'{n}: minDomains {md}')
 check(job['spec']['backoffLimit']==0 and job['spec']['template']['spec']['serviceAccountName']=='db-migrate', 'migration job SA + no retries')
 es=one(api,'ExternalSecret','weysure-app-config'); check(es['metadata']['annotations'].get('argocd.argoproj.io/hook')=='PreSync' and es['metadata']['annotations'].get('argocd.argoproj.io/sync-wave')=='-2', 'ExternalSecret is a PreSync hook before the migration Job'); check(es['spec']['dataFrom'][0]['extract']['key']=='weysure/prod' and es['spec']['secretStoreRef']['name']=='vault', 'ExternalSecret from weysure/prod')
-ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='weysure-api.beyrictech.com' and ing['metadata']['annotations']['cert-manager.io/cluster-issuer']=='letsencrypt-prod', 'api ingress + cert')
+ing=one(api,'Ingress','api'); check(ing['spec']['rules'][0]['host']=='api.weysure.com' and len(ing['spec']['rules'])==1 and ing['spec']['tls']==[{'secretName':'api-extra-tls','hosts':['api.weysure.com']}] and ing['metadata']['annotations']['cert-manager.io/cluster-issuer']=='letsencrypt-prod', 'api ingress: only api.weysure.com, certificate Secret api-extra-tls')
 check(one(api,'PodDisruptionBudget','api')['spec']['minAvailable']==1 and one(api,'HorizontalPodAutoscaler','api')['spec']['maxReplicas']==4, 'api PDB + HPA')
 check(one(api,'ServiceAccount','api')['automountServiceAccountToken'] is True, 'api SA token mounted for vault auth')
 # api-worker (queue worker, no port)

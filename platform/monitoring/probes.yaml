@@ -13,7 +13,6 @@ spec:
   targets:
     staticConfig:
       static:
-        - https://weysure-api.beyrictech.com/api/v1/health
         - https://weysure.beyrictech.com/
         - https://api.weysure.com/api/v1/health
         - https://weysure.com/

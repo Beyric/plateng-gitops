@@ -14,7 +14,8 @@ metadata:
 spec:
   ingressClassName: {{ $ing.className | default "traefik" }}
   tls:
-    - secretName: {{ $name }}-tls
+    {{- /* tlsSecretName lets a renamed primary host keep the Secret (and the Certificate that fills it) that already holds a valid certificate for it, so the move reissues nothing. */}}
+    - secretName: {{ $ing.tlsSecretName | default (printf "%s-tls" $name) }}
       hosts: [{{ $ing.host | required (printf "components.%s.ingress.host is required" $name) }}]
     {{- with $ing.extraHosts }}
     # Own secret, so own Certificate: a failed issue for an extra host never blocks
