@@ -58,6 +58,7 @@ components: {}
 #    service: { enabled: true }
 #    ingress: { enabled: false, host: "", clusterIssuer: letsencrypt-prod, className: traefik }
 #    ingress.extraHosts: []   # more hosts on the same Service; one extra Certificate (<name>-extra-tls)
+#    ingress.tlsSecretName: ""  # primary host's TLS Secret; default <name>-tls (set to reuse an existing certificate Secret)
 #    probes: { path: /, startupFailureThreshold: 30 }
 #    probes: { exec: [sh, -c, "..."] }   # port-less: startup + liveness exec, no readiness
 #    vaultRestartCommand: ""  # overrides vaultAgent.restartCommand (the process to SIGTERM)

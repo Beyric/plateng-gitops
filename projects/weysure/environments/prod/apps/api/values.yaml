@@ -49,7 +49,7 @@ commonEnv: &commonEnv
   # web host redirects to weysure.com (phase C).
   SERVER_HOST: https://api.weysure.com
   FRONTEND_URL: https://weysure.com
-  BACKEND_CORS_ORIGINS: '["https://weysure.com", "https://weysure.beyrictech.com"]'
+  BACKEND_CORS_ORIGINS: '["https://weysure.com"]'
   REDIS_URL: redis://redis:6379/0
   RUN_MIGRATIONS: "false"          # the PreSync Job owns migrations (spec D3)
   WEB_CONCURRENCY: "2"
@@ -125,7 +125,9 @@ components:
     port: 8000
     vaultAgent: true
     env: *commonEnv
-    ingress: { enabled: true, host: weysure-api.beyrictech.com, extraHosts: [api.weysure.com] }
+    # C2 (2026-10-29): the old host weysure-api.beyrictech.com is retired. api.weysure.com keeps the Secret its
+    # certificate already lives in (api-extra-tls), so nothing is reissued and there is no certificate gap.
+    ingress: { enabled: true, host: api.weysure.com, tlsSecretName: api-extra-tls }
     probes: { path: /api/v1/health }
     resources:
       requests: { cpu: 250m, memory: 512Mi }
