@@ -63,6 +63,13 @@ decoy-create|1.2.3.4 - - [16/Oct/2026:10:00:00 +0000] "POST /api/v1/escrow/invit
 decoy-resend|1.2.3.4 - - [16/Oct/2026:10:00:00 +0000] "POST /api/v1/escrow/invites/DECOYID0001/resend HTTP/2.0" 200 30|/api/v1/escrow/invites/DECOYID0001/resend|{token}
 decoy-bare-list|"GET /api/v1/invites/ HTTP/2.0" 404|GET /api/v1/invites/ HTTP/2.0|{token}
 decoy-word|invite.send job done for invite_id=DECOYID0002 (invites/ in text)|invite_id=DECOYID0002 (invites/ in text)|{token}
+cookie-request-header|1.2.3.4 - - [30/Oct/2026:10:00:00 +0000] "POST /api/v1/auth/refresh HTTP/2.0" 200 40 "-" "Cookie: wey_rt=FAKECOOKIE01; wey_did=FAKECOOKIE02; other=FAKECOOKIE03" 1|Cookie: <redacted-cookie>|FAKECOOKIE
+cookie-set-cookie|response headers Set-Cookie: wey_at=FAKECOOKIE04; Path=/api/v1; HttpOnly; Secure; SameSite=Strict|Set-Cookie: <redacted-cookie>|FAKECOOKIE
+cookie-kv-in-text|request carried wey_mfa=FAKECOOKIE05 and was rejected|wey_mfa=<redacted-cookie> and was rejected|FAKECOOKIE
+cookie-dict-repr|cookies={'wey_art': 'FAKECOOKIE06', 'other': 'x'}|'wey_art': '<redacted-cookie>'|FAKECOOKIE
+cookie-json-header|{"level":"info","cookie":"wey_rt=FAKECOOKIE07"}|"cookie":"<redacted-cookie>"|FAKECOOKIE
+decoy-cookie-setting|[INFO] REFRESH_COOKIE_SECURE=true ACCESS_COOKIE_MODE=dual|REFRESH_COOKIE_SECURE=true ACCESS_COOKIE_MODE=dual|<redacted-cookie>
+decoy-cookie-words|refresh cookie rotated; wey_did_lookup=DECOYCOOKIE08 for wey_at name only|wey_did_lookup=DECOYCOOKIE08 for wey_at name only|<redacted-cookie>
 EOF
 )
 

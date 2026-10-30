@@ -109,6 +109,23 @@ spec:
                   expression = `(eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]+)`
                   replace    = "<redacted-jwt>"
                 }
+                // Sign-in cookies (cookie mode, Weysure-API feature/auth-2fa-api): the access
+                // cookie is a JWT (masked above), but the refresh, device and 2FA cookies are
+                // opaque. Nothing logs them today (Traefik logs no header fields; 7 days of Loki
+                // show none). These three stages are the net if a header, a Set-Cookie or a cookie
+                // dict is ever logged: by cookie name, by header name, and by dict/JSON key.
+                stage.replace {
+                  expression = `\bwey_(?:at|aat|rt|art|did|mfa)=([^;\s"',]+)`
+                  replace    = "<redacted-cookie>"
+                }
+                stage.replace {
+                  expression = `["']wey_(?:at|aat|rt|art|did|mfa)["']\s*:\s*["']([^"']+)["']`
+                  replace    = "<redacted-cookie>"
+                }
+                stage.replace {
+                  expression = `(?i)\b(?:set-)?cookie["']?\s*[:=]\s*["']?([^"'\r\n]+)`
+                  replace    = "<redacted-cookie>"
+                }
               }
 
               loki.write "default" {
