@@ -1,0 +1,64 @@
+# Log-based alerts for the live auto-pause (Weysure-API T3-A5, LIVE_AUTO_PAUSE_MODE=enforce since 2026-10-29).
+# Evaluated by the Loki ruler (bootstrap/apps/loki.yaml), routed by the same
+# Alertmanager as Prometheus; same layout as loki-rules-withdrawals.yaml.
+#
+# Source: app/services/live_pause.py, app/services/live_auto_pause.py and
+# app/worker/handlers/live_auto_pause.py (container api-worker, loguru prefix in front):
+#   ... | WARNING  | ... - [LIVE AUTO PAUSE] paused live keys of <user id>
+#   ... | ERROR    | ... - [LIVE AUTO PAUSE] failed for <user id>: <ExceptionName>
+#   ... | ERROR    | ... - [LIVE AUTO PAUSE] sweep failed: <ExceptionName>
+# - paused: one line per developer whose live keys the sweep paused. The paused keys stay paused
+#   until a superadmin resumes them (Adebayo reviews each case); developers write to the support
+#   inbox. The in-app admin notification (live_keys_auto_paused) exists too; this alert is the
+#   page that does not depend on someone opening the admin screen.
+# - failing: the sweep could not pause a developer that tripped a rule, or the whole sweep failed.
+#   The developer's live keys are STILL ACTIVE and the sweep runs again in LIVE_AUTO_PAUSE_SWEEP_MINUTES.
+# Not matched on purpose: "shadow: would pause <id>" (shadow mode pauses nothing) and
+# "<n> developer(s) tripped a rule" (it also appears with shadow mode and with a clean pause).
+#
+# One-shot events, so count_over_time, not a level, and no `for:`. sum() drops stream labels: one
+# page per alert name; the user ids are in Loki (runbook). platform-sleep.sh silences every alert
+# in Alertmanager, these included.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-autopause
+  namespace: monitoring
+  labels: { loki_rule: "1" }
+  annotations:
+    # auth_enabled: false -> single tenant "fake" -> /rules/fake/<file>
+    k8s-sidecar-target-directory: /rules/fake
+data:
+  autopause.yaml: |
+    groups:
+      - name: weysure.autopause
+        interval: 1m
+        rules:
+          - alert: LiveKeysAutoPaused
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container=~"api|api-worker"}
+                    |= `[LIVE AUTO PAUSE] paused live keys of`
+                  [30m]
+                )
+              ) > 0
+            labels: { severity: warning, namespace: weysure-prod }
+            annotations:
+              summary: "The auto-pause paused a developer's live API keys"
+              description: "{{ $value }} developer(s) had their live keys paused by the auto-pause sweep in the last 30 min. Their live calls fail until a superadmin resumes them. Review each case (admin notification live_keys_auto_paused, user ids in Loki) and reply to the developer via the support inbox. This alert resolves by itself after 30 min; the pause does not."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#livekeysautopaused
+          - alert: LiveAutoPauseFailing
+            expr: |
+              sum(
+                count_over_time(
+                  {namespace="weysure-prod", container=~"api|api-worker"}
+                    |~ `\[LIVE AUTO PAUSE\] (failed for|sweep failed)`
+                  [30m]
+                )
+              ) > 0
+            labels: { severity: critical, namespace: weysure-prod }
+            annotations:
+              summary: "The live auto-pause sweep is failing"
+              description: "{{ $value }} failure line(s) in 30 min from the auto-pause sweep. A developer that tripped a rule may still have ACTIVE live keys. The sweep runs again by itself; if this keeps firing, read the api-worker error in Loki and check LIVE_AUTO_PAUSE_MODE; switching it to shadow or off is a gitops ConfigMap change."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#liveautopausefailing
