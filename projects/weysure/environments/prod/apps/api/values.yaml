@@ -64,7 +64,13 @@ commonEnv: &commonEnv
   # Risk holds (Weysure-API #64, not deployed yet): written out off, so the starting state
   # is in git, not in code defaults. Ignored by images before #64. Each later stage
   # (capture, shadow, enforce) is its own reviewed change. enforce needs the flag above.
-  RISK_HOLDS_MODE: "off"
+  # 2026-11-04: enforce (Adebayo, pre-launch test phase). Needed before DVA_CREATE_ENABLED: the API refuses
+  # to boot with DVA on unless RISK_HOLDS_MODE or CHARGEBACKS_MODE is enforce (Weysure-API app/core/config.py,
+  # _dva_settings_are_coherent). An earned credit that fires a risk signal is held 24 or 72 h, neither
+  # withdrawable nor spendable; signal capture stays off (RISK_SIGNALS_CAPTURE_ENABLED, privacy clause pending).
+  # Rollback: "off" releases every hold at once, but keep it on for as long as any DVA account exists
+  # (the API refuses to start with a DVA account and holds off).
+  RISK_HOLDS_MODE: "enforce"
   RISK_SIGNALS_CAPTURE_ENABLED: "false"
   # Socket peers allowed to vouch for CF-Connecting-IP (Weysure-API #66, not deployed yet).
   # The VPC: only Traefik (behind the Cloudflare-only NLB, gitops #69) reaches the API.
