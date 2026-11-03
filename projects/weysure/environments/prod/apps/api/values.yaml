@@ -91,6 +91,19 @@ commonEnv: &commonEnv
   # paused stay paused until a superadmin resumes them.
   LIVE_AUTO_PAUSE_MODE: "enforce"
 
+  # --- Dedicated virtual accounts (DVA) and card-to-cash -----------------------
+  # 2026-11-04: on, all three DVA gates (Adebayo: pre-launch is the test phase). Order matters:
+  # RISK_HOLDS_MODE=enforce must already be live (boot refuses DVA_CREATE_ENABLED without enforced
+  # holds), and DVA_REFUND_ENABLED needs REFUND_TO_SOURCE_ENABLED (same boot check).
+  # A sk_test_ key forces the Paystack test-bank provider, so no real money moves.
+  # Rollback: DVA_CREATE_ENABLED off only stops NEW accounts; credits to existing accounts keep
+  # arriving, so keep ORIGIN_RULES_ENFORCED and RISK_HOLDS_MODE=enforce on while any account exists.
+  # DVA_REFUND_ENABLED off first if the API image is ever rolled back below #140.
+  DVA_CREATE_ENABLED: "true"
+  DVA_CARD_CAP_ENABLED: "true"
+  REFUND_TO_SOURCE_ENABLED: "true"
+  DVA_REFUND_ENABLED: "true"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
