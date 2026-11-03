@@ -27,6 +27,15 @@ def check(cond, msg):
 images = yaml.safe_load(open('projects/weysure/environments/prod/images.yaml'))
 dep=one(api,'Deployment','api'); pod=dep['spec']['template']; c=pod['spec']['containers'][0]
 check(c['image'].endswith(':'+images['api']['tag']), 'api image tag comes from images.yaml')
+# Mirrors the API's boot guard (Weysure-API app/core/config.py, _dva_settings_are_coherent): a pod that
+# fails it never starts, so catch the ordering mistake here, not in the rollout.
+for name in ('api', 'api-worker'):
+    e = one(api, 'ConfigMap', name + '-config')['data']
+    if e.get('DVA_CREATE_ENABLED') == 'true':
+        check(e.get('ORIGIN_RULES_ENFORCED') == 'true', f'{name}: DVA_CREATE_ENABLED needs ORIGIN_RULES_ENFORCED=true')
+        check('enforce' in (e.get('RISK_HOLDS_MODE'), e.get('CHARGEBACKS_MODE')), f'{name}: DVA_CREATE_ENABLED needs RISK_HOLDS_MODE or CHARGEBACKS_MODE = enforce')
+    if e.get('DVA_REFUND_ENABLED') == 'true':
+        check(e.get('REFUND_TO_SOURCE_ENABLED') == 'true', f'{name}: DVA_REFUND_ENABLED needs REFUND_TO_SOURCE_ENABLED=true')
 check(dep['spec']['replicas']==2 and dep['spec']['strategy']['rollingUpdate']['maxUnavailable']==0, 'api 2 replicas, maxUnavailable 0')
 a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
