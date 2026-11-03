@@ -27,6 +27,15 @@ def check(cond, msg):
 images = yaml.safe_load(open('projects/weysure/environments/prod/images.yaml'))
 dep=one(api,'Deployment','api'); pod=dep['spec']['template']; c=pod['spec']['containers'][0]
 check(c['image'].endswith(':'+images['api']['tag']), 'api image tag comes from images.yaml')
+# Mirrors the API's boot guard (Weysure-API app/core/config.py, _dva_settings_are_coherent): a pod that
+# fails it never starts, so catch the ordering mistake here, not in the rollout.
+for name in ('api', 'api-worker'):
+    e = one(api, 'ConfigMap', name + '-config')['data']
+    if e.get('DVA_CREATE_ENABLED') == 'true':
+        check(e.get('ORIGIN_RULES_ENFORCED') == 'true', f'{name}: DVA_CREATE_ENABLED needs ORIGIN_RULES_ENFORCED=true')
+        check('enforce' in (e.get('RISK_HOLDS_MODE'), e.get('CHARGEBACKS_MODE')), f'{name}: DVA_CREATE_ENABLED needs RISK_HOLDS_MODE or CHARGEBACKS_MODE = enforce')
+    if e.get('DVA_REFUND_ENABLED') == 'true':
+        check(e.get('REFUND_TO_SOURCE_ENABLED') == 'true', f'{name}: DVA_REFUND_ENABLED needs REFUND_TO_SOURCE_ENABLED=true')
 check(dep['spec']['replicas']==2 and dep['spec']['strategy']['rollingUpdate']['maxUnavailable']==0, 'api 2 replicas, maxUnavailable 0')
 a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
@@ -53,7 +62,7 @@ for name,data in (('api',cm),('api-worker',wk)):
     check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
 for n in ('api-config','api-worker-config'):
     d=one(api,'ConfigMap',n)['data']
-    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='off' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds off, trusted proxy = VPC')
+    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='enforce' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds enforce, capture off, trusted proxy = VPC')
     check(d.get('WS_ALLOW_URL_TOKEN')=='false', f'{n}: WebSocket token never accepted in the URL')
     check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
 check(not [d for d in api if d['metadata']['name'].startswith('api-scheduler')], 'api-scheduler removed (2026-10-26): no Deployment, ConfigMap, ServiceAccount or Service')
