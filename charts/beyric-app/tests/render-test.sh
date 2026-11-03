@@ -62,7 +62,7 @@ for name,data in (('api',cm),('api-worker',wk)):
     check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
 for n in ('api-config','api-worker-config'):
     d=one(api,'ConfigMap',n)['data']
-    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='off' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds off, trusted proxy = VPC')
+    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='enforce' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds enforce, capture off, trusted proxy = VPC')
     check(d.get('WS_ALLOW_URL_TOKEN')=='false', f'{n}: WebSocket token never accepted in the URL')
     check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
 check(not [d for d in api if d['metadata']['name'].startswith('api-scheduler')], 'api-scheduler removed (2026-10-26): no Deployment, ConfigMap, ServiceAccount or Service')
