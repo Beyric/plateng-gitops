@@ -109,6 +109,16 @@ commonEnv: &commonEnv
   # dependency. Off again: user routes answer 403 KYC_ENHANCED_DISABLED; admin reviews stay open.
   KYC_ENHANCED_ENABLED: "true"
 
+  # --- KYB: business applications with a CAC lookup (Dojah) ---------------------
+  # 2026-11-05: on for the pre-launch test phase (Adebayo). Needs Weysure-API #145 (8f8500d1) or later:
+  # older images do not know the opt-in and refuse the sandbox in prelaunch. The Dojah SANDBOX answers
+  # one fixed active company for ANY CAC number, so every lookup passes: test data only. Before real
+  # applicants (or at launch, with DOJAH_ENVIRONMENT=production) set DOJAH_SANDBOX_CAC_IN_PRELAUNCH
+  # to "false". Off again: KYB_APPLICATIONS_ENABLED "false" first.
+  CAC_PROVIDER: "dojah"
+  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
+  KYB_APPLICATIONS_ENABLED: "true"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
