@@ -104,6 +104,11 @@ commonEnv: &commonEnv
   REFUND_TO_SOURCE_ENABLED: "true"
   DVA_REFUND_ENABLED: "true"
 
+  # --- KYC Tier 3 (self-serve enhanced: NIN + source of funds) ------------------
+  # 2026-11-05: on (Adebayo, pre-launch test phase). Uses DOJAH_NIN_WIDGET_ID (set above). No boot
+  # dependency. Off again: user routes answer 403 KYC_ENHANCED_DISABLED; admin reviews stay open.
+  KYC_ENHANCED_ENABLED: "true"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
