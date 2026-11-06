@@ -119,6 +119,19 @@ commonEnv: &commonEnv
   DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
   KYB_APPLICATIONS_ENABLED: "true"
 
+  # --- Auth: 2FA (TOTP + passkeys), step-up in shadow ---------------------------
+  # 2026-11-06: step A of two (Adebayo). Needs Weysure-API #144 + #147 (0822a174) or later.
+  # MFA_ENABLED needs MFA_ENCRYPTION_KEY + MFA_CODE_PEPPER (Vault secret/weysure/prod, present)
+  # and WEBAUTHN_RP_ID; boot fails without them. Users and admins can enrol a factor; nobody is
+  # forced to and nobody is signed out. Step-up "shadow" only logs what enforce would block.
+  # Step B (separate PR, after the admins have enrolled): SESSION_SID_ENFORCED "true" with
+  # MFA_ADMIN_REQUIRED "true" and MFA_STEP_UP_ENFORCED "enforce" (the boot guard refuses the
+  # last two without the first). Off again: MFA_STEP_UP_ENFORCED "off", then MFA_ENABLED "false".
+  MFA_ENABLED: "true"
+  MFA_STEP_UP_ENFORCED: "shadow"
+  WEBAUTHN_RP_ID: "weysure.com"
+  WEBAUTHN_ORIGINS: '["https://weysure.com"]'
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
