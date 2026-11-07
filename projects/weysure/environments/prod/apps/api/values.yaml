@@ -119,16 +119,21 @@ commonEnv: &commonEnv
   DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
   KYB_APPLICATIONS_ENABLED: "true"
 
-  # --- Auth: 2FA (TOTP + passkeys), step-up in shadow ---------------------------
-  # 2026-11-06: step A of two (Adebayo). Needs Weysure-API #144 + #147 (0822a174) or later.
-  # MFA_ENABLED needs MFA_ENCRYPTION_KEY + MFA_CODE_PEPPER (Vault secret/weysure/prod, present)
-  # and WEBAUTHN_RP_ID; boot fails without them. Users and admins can enrol a factor; nobody is
-  # forced to and nobody is signed out. Step-up "shadow" only logs what enforce would block.
-  # Step B (separate PR, after the admins have enrolled): SESSION_SID_ENFORCED "true" with
-  # MFA_ADMIN_REQUIRED "true" and MFA_STEP_UP_ENFORCED "enforce" (the boot guard refuses the
-  # last two without the first). Off again: MFA_STEP_UP_ENFORCED "off", then MFA_ENABLED "false".
+  # --- Auth: 2FA (TOTP + passkeys) ----------------------------------------------
+  # 2026-11-06: step A (Adebayo): MFA_ENABLED on, step-up in shadow. Needs Weysure-API #144 + #147
+  # (0822a174) or later. MFA_ENABLED needs MFA_ENCRYPTION_KEY + MFA_CODE_PEPPER (Vault
+  # secret/weysure/prod, present) and WEBAUTHN_RP_ID; boot fails without them.
+  # Step B (this block, after the admins enrolled a factor): enforcement. The boot guard
+  # (app/core/boot_guard.py _session_enforcement_problems) refuses MFA_ADMIN_REQUIRED or step-up
+  # "enforce" without SESSION_SID_ENFORCED, so the three go together. EFFECT: an admin with no
+  # factor is signed out and must enrol on the next sign-in; a session with no session row stops
+  # working; sensitive actions ask for a fresh second factor.
+  # Roll back one step: MFA_STEP_UP_ENFORCED "shadow" and MFA_ADMIN_REQUIRED "false" (keep
+  # SESSION_SID_ENFORCED, it is harmless). Off again after that: "off", then MFA_ENABLED "false".
   MFA_ENABLED: "true"
-  MFA_STEP_UP_ENFORCED: "shadow"
+  MFA_ADMIN_REQUIRED: "true"
+  MFA_STEP_UP_ENFORCED: "enforce"
+  SESSION_SID_ENFORCED: "true"
   WEBAUTHN_RP_ID: "weysure.com"
   WEBAUTHN_ORIGINS: '["https://weysure.com"]'
 
