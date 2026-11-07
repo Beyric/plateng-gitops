@@ -68,6 +68,9 @@ cookie-set-cookie|response headers Set-Cookie: wey_at=FAKECOOKIE04; Path=/api/v1
 cookie-kv-in-text|request carried wey_mfa=FAKECOOKIE05 and was rejected|wey_mfa=<redacted-cookie> and was rejected|FAKECOOKIE
 cookie-dict-repr|cookies={'wey_art': 'FAKECOOKIE06', 'other': 'x'}|'wey_art': '<redacted-cookie>'|FAKECOOKIE
 cookie-json-header|{"level":"info","cookie":"wey_rt=FAKECOOKIE07"}|"cookie":"<redacted-cookie>"|FAKECOOKIE
+cookie-host-kv|response headers x-debug __Host-wey_rt=FAKECOOKIE09; Path=/ ok|__Host-wey_rt=<redacted-cookie>|FAKECOOKIE
+cookie-host-dict-repr|cookies={'__Host-wey_art': 'FAKECOOKIE10', 'other': 'x'}|'__Host-wey_art': '<redacted-cookie>'|FAKECOOKIE
+cookie-host-json-key|{"__Host-wey_at": "FAKECOOKIE11", "n": 1}|"__Host-wey_at": "<redacted-cookie>"|FAKECOOKIE
 decoy-cookie-setting|[INFO] REFRESH_COOKIE_SECURE=true ACCESS_COOKIE_MODE=dual|REFRESH_COOKIE_SECURE=true ACCESS_COOKIE_MODE=dual|<redacted-cookie>
 decoy-cookie-words|refresh cookie rotated; wey_did_lookup=DECOYCOOKIE08 for wey_at name only|wey_did_lookup=DECOYCOOKIE08 for wey_at name only|<redacted-cookie>
 EOF

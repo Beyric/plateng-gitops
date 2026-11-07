@@ -114,12 +114,14 @@ spec:
                 // opaque. Nothing logs them today (Traefik logs no header fields; 7 days of Loki
                 // show none). These three stages are the net if a header, a Set-Cookie or a cookie
                 // dict is ever logged: by cookie name, by header name, and by dict/JSON key.
+                // COOKIE_HOST_PREFIX renames them __Host-<name>: the name rule still matches (\b sits after the
+                // hyphen), the dict/JSON-key rule allows the prefix explicitly.
                 stage.replace {
                   expression = `\bwey_(?:at|aat|rt|art|did|mfa)=([^;\s"',]+)`
                   replace    = "<redacted-cookie>"
                 }
                 stage.replace {
-                  expression = `["']wey_(?:at|aat|rt|art|did|mfa)["']\s*:\s*["']([^"']+)["']`
+                  expression = `["'](?:__Host-)?wey_(?:at|aat|rt|art|did|mfa)["']\s*:\s*["']([^"']+)["']`
                   replace    = "<redacted-cookie>"
                 }
                 stage.replace {
