@@ -36,6 +36,9 @@ for name in ('api', 'api-worker'):
         check('enforce' in (e.get('RISK_HOLDS_MODE'), e.get('CHARGEBACKS_MODE')), f'{name}: DVA_CREATE_ENABLED needs RISK_HOLDS_MODE or CHARGEBACKS_MODE = enforce')
     if e.get('DVA_REFUND_ENABLED') == 'true':
         check(e.get('REFUND_TO_SOURCE_ENABLED') == 'true', f'{name}: DVA_REFUND_ENABLED needs REFUND_TO_SOURCE_ENABLED=true')
+    # Mirrors Weysure-API app/core/boot_guard.py _session_enforcement_problems (L10).
+    if e.get('MFA_ADMIN_REQUIRED') == 'true' or e.get('MFA_STEP_UP_ENFORCED') == 'enforce':
+        check(e.get('SESSION_SID_ENFORCED') == 'true', f'{name}: MFA_ADMIN_REQUIRED / step-up enforce needs SESSION_SID_ENFORCED=true')
 check(dep['spec']['replicas']==2 and dep['spec']['strategy']['rollingUpdate']['maxUnavailable']==0, 'api 2 replicas, maxUnavailable 0')
 a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
