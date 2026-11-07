@@ -39,6 +39,10 @@ for name in ('api', 'api-worker'):
     # Mirrors Weysure-API app/core/boot_guard.py _session_enforcement_problems (L10).
     if e.get('MFA_ADMIN_REQUIRED') == 'true' or e.get('MFA_STEP_UP_ENFORCED') == 'enforce':
         check(e.get('SESSION_SID_ENFORCED') == 'true', f'{name}: MFA_ADMIN_REQUIRED / step-up enforce needs SESSION_SID_ENFORCED=true')
+    # Weysure-API app/core/auth_cookies.py: __Host- needs Secure, so COOKIE_HOST_PREFIX is silently ignored
+    # while REFRESH_COOKIE_SECURE is false. Unset means the API default (true).
+    if e.get('COOKIE_HOST_PREFIX') == 'true':
+        check(e.get('REFRESH_COOKIE_SECURE', 'true') != 'false', f'{name}: COOKIE_HOST_PREFIX needs REFRESH_COOKIE_SECURE=true (else the flag does nothing)')
 check(dep['spec']['replicas']==2 and dep['spec']['strategy']['rollingUpdate']['maxUnavailable']==0, 'api 2 replicas, maxUnavailable 0')
 a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
