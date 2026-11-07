@@ -137,6 +137,16 @@ commonEnv: &commonEnv
   WEBAUTHN_RP_ID: "weysure.com"
   WEBAUTHN_ORIGINS: '["https://weysure.com"]'
 
+  # --- Auth: __Host- cookie names -------------------------------------------------
+  # 2026-11-07 (Adebayo): every auth cookie is named __Host-<name> (Secure, Path=/, no Domain), so a
+  # sibling *.weysure.com site cannot plant or shadow a session cookie. Needs Weysure-API #147
+  # (0822a174) or later; older images ignore the flag. Nobody is signed out: reads try the new name
+  # then the old, and a session moves over on its next refresh. No web change (the cookies are
+  # httpOnly and the web never reads them). REFRESH_COOKIE_SECURE stays true (the default), or the
+  # flag is ignored. Side effect: the refresh cookie now rides on every API request, not only /auth.
+  # Roll back: "false" (also signs nobody out). The API drops the old-name fallback on 2026-12-15.
+  COOKIE_HOST_PREFIX: "true"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
