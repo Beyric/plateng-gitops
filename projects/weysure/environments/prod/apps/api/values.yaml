@@ -67,11 +67,14 @@ commonEnv: &commonEnv
   # 2026-11-04: enforce (Adebayo, pre-launch test phase). Needed before DVA_CREATE_ENABLED: the API refuses
   # to boot with DVA on unless RISK_HOLDS_MODE or CHARGEBACKS_MODE is enforce (Weysure-API app/core/config.py,
   # _dva_settings_are_coherent). An earned credit that fires a risk signal is held 24 or 72 h, neither
-  # withdrawable nor spendable; signal capture stays off (RISK_SIGNALS_CAPTURE_ENABLED, privacy clause pending).
+  # withdrawable nor spendable. 2026-11-16: signal capture ON (Adebayo): HMAC-SHA256 of the device cookie and of
+  # the client IP at sign-in and on escrow create/accept/confirm, 90 days, so shared-device and shared-network
+  # signals can fire. The privacy page already carries the "Device and Network Signals" section. Needs
+  # RISK_SIGNAL_HASH_KEY (>= 32 bytes) in Vault secret/weysure/prod, or the API refuses to boot (config.py).
   # Rollback: "off" releases every hold at once, but keep it on for as long as any DVA account exists
   # (the API refuses to start with a DVA account and holds off).
   RISK_HOLDS_MODE: "enforce"
-  RISK_SIGNALS_CAPTURE_ENABLED: "false"
+  RISK_SIGNALS_CAPTURE_ENABLED: "true"
   # Socket peers allowed to vouch for CF-Connecting-IP (Weysure-API #66, not deployed yet).
   # The VPC: only Traefik (behind the Cloudflare-only NLB, gitops #69) reaches the API.
   # A platform fact, so it lives here, not as a code default. Ignored by earlier images.
@@ -157,13 +160,14 @@ commonEnv: &commonEnv
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
   TERMII_BASE_URL: https://v4.api.termii.com/      # this account's host, from the Termii dashboard
-  TERMII_SENDER_ID: N-Alert                        # exact case: Termii matches the registered sender ID
+  TERMII_SENDER_ID: "OE Alert"                     # exact case: Termii matches the registered sender ID (new Weysure workspace, 2026-11-16)
   TERMII_OTP_CHANNEL: dnd
-  # "Luran" is the brand the SMS route is registered under for now (Adebayo, 2026-10-02).
+  # 2026-11-16: the Weysure Termii workspace, sender ID and this template are approved (Adebayo); the secret
+  # TERMII_API_KEY in Vault is the new workspace's key. Before this, the Luran-branded route was used.
   # Must stay character-for-character the template Termii approved for the DND
   # route, or messages are rejected. {code} is required; {minutes} is filled from
   # OTP_EXPIRE_MINUTES - which must therefore stay 10 while the approved text says so.
-  TERMII_OTP_TEMPLATE: "Your Luran verification code is {code}. Enter this to verify your phone number. Valid for {minutes} minutes. Do not share this code with anyone."
+  TERMII_OTP_TEMPLATE: "Your Weysure verification code is {code}. Enter this to verify your phone number. Valid for {minutes} minutes. Do not share this code with anyone."
   OTP_EXPIRE_MINUTES: "10"
   OTP_RESEND_COOLDOWN_SECONDS: "60"
   OTP_RESEND_DAILY_CAP: "5"

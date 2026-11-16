@@ -60,7 +60,7 @@ wk=one(api,'ConfigMap','api-worker-config')['data']; check(wk['WALLET_RECONCILIA
 kyc=['TERMII_BASE_URL','TERMII_SENDER_ID','TERMII_OTP_CHANNEL','TERMII_OTP_TEMPLATE','OTP_EXPIRE_MINUTES','OTP_RESEND_COOLDOWN_SECONDS','OTP_RESEND_DAILY_CAP','DOJAH_ENVIRONMENT','DOJAH_BASE_URL','DOJAH_APP_ID','DOJAH_PUBLIC_KEY','DOJAH_BVN_WIDGET_ID','DOJAH_NIN_WIDGET_ID','DOJAH_FACE_MATCH_THRESHOLD']
 for name,data in (('api',cm),('api-worker',wk)):
     check(all(data.get(k) for k in kyc), f'{name}: all 14 KYC config values present and non-empty')
-    check(data.get('TERMII_SENDER_ID')=='N-Alert', f'{name}: Termii sender ID in its registered case')
+    check(data.get('TERMII_SENDER_ID')=='OE Alert', f'{name}: Termii sender ID in its registered case')
     check('{code}' in data.get('TERMII_OTP_TEMPLATE','') and data.get('OTP_EXPIRE_MINUTES')=='10', f'{name}: OTP template keeps {{code}} and the approved 10 minutes')
     check(not any(k in data for k in ('TERMII_API_KEY','DOJAH_API_KEY','DOJAH_WEBHOOK_SECRET','KYC_FINGERPRINT_KEY')), f'{name}: no secret in the ConfigMap')
     env=data.get('ENVIRONMENT','').strip().lower()
@@ -69,7 +69,7 @@ for name,data in (('api',cm),('api-worker',wk)):
     check((data.get('DOJAH_ENVIRONMENT')=='sandbox')==('sandbox' in data.get('DOJAH_BASE_URL','')) and (data.get('DOJAH_ENVIRONMENT')=='sandbox')==data.get('DOJAH_PUBLIC_KEY','').startswith('test_'), f'{name}: Dojah environment, host and public key agree')
 for n in ('api-config','api-worker-config'):
     d=one(api,'ConfigMap',n)['data']
-    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='enforce' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='false' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds enforce, capture off, trusted proxy = VPC')
+    check(d.get('ORIGIN_RULES_ENFORCED')=='true' and d.get('RISK_HOLDS_MODE')=='enforce' and d.get('RISK_SIGNALS_CAPTURE_ENABLED')=='true' and d.get('TRUSTED_PROXY_CIDRS')=='10.0.0.0/16', f'{n}: origin rules on, risk holds enforce, capture on, trusted proxy = VPC')
     check(d.get('WS_ALLOW_URL_TOKEN')=='false', f'{n}: WebSocket token never accepted in the URL')
     check(not (d.get('RISK_HOLDS_MODE')=='enforce' and d.get('ORIGIN_RULES_ENFORCED')!='true'), f'{n}: enforce never without origin rules (the API refuses to boot)')
 check(not [d for d in api if d['metadata']['name'].startswith('api-scheduler')], 'api-scheduler removed (2026-10-26): no Deployment, ConfigMap, ServiceAccount or Service')
