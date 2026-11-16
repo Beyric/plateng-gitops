@@ -147,6 +147,12 @@ commonEnv: &commonEnv
   # Roll back: "false" (also signs nobody out). The API drops the old-name fallback on 2026-12-15.
   COOKIE_HOST_PREFIX: "true"
 
+  # Emailed links carry their one-time token after a "#" (/reset-password#t=<token>) instead of in the
+  # path, so it never reaches a server log or a Referer header. The web reads the fragment, strips it from
+  # the address bar and asks for a Confirm click before acting (Weysure web #80, live since 2026-11-16;
+  # the old path-token pages keep working for links already sent). Roll back: "false".
+  EMAIL_TOKEN_FRAGMENT_LINKS: "true"
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
