@@ -156,6 +156,51 @@ commonEnv: &commonEnv
   # the old path-token pages keep working for links already sent). Roll back: "false".
   EMAIL_TOKEN_FRAGMENT_LINKS: "true"
 
+  # --- 2026-11-17 (Adebayo: "switch everything on", no feature stays dark) ----------------------------
+  # Every switch below was unset in this file, so it ran on the code default (off). All are in commonEnv
+  # because the api pods read some (checkout, claim, sign-in) and the worker pods read others (the clocks,
+  # chargeback jobs); setting a flag on both is harmless. Each reverts alone: set it back to its old value.
+  #
+  # Chargebacks. enforce: a card dispute opens a case, freezes the buyer, answers
+  # Paystack and recovers the money. Boot guard: needs ORIGIN_RULES_ENFORCED=true (set above). The auto-
+  # response sends evidence before Paystack's deadline (margin 6 h, defaults kept). Rollback: CHARGEBACKS_MODE
+  # "off" (freezes already in force stay until an admin releases them); never roll the image back, the
+  # migration is not reversible once enforce ran. DVA_CREATE_ENABLED is satisfied by RISK_HOLDS_MODE above.
+  CHARGEBACKS_MODE: "enforce"
+  CHARGEBACK_AUTO_RESPOND_ENABLED: "true"
+  # A card refund Paystack marks needs-attention is retried once to the user's own-name bank account (Tier 2,
+  # exactly one such account). Paystack's retry endpoint was NOT seen in test mode (Weysure-API
+  # app/services/paystack.py retry_refund_with_account). If it answers an error: the one attempt is already
+  # recorded, so it is never tried twice, admins get a "Card refund retry failed" alert, the refund stays
+  # needs-attention and is sorted out in the Paystack dashboard (the in-app "credit back" is refused after a
+  # bank retry was sent). No money moves on an error. Test mode never makes such a refund, so this is idle
+  # until a real one fails. Rollback: "false" (such refunds go to the admin queue).
+  SOURCE_REFUND_RETRY_ENABLED: "true"
+  # Deal invites: start a deal with someone who has no account. Gates new invites and resends only.
+  DEAL_INVITES_ENABLED: "true"
+  # Developer-API deal clocks (Train 4/5). Unpaid deals expire after the deadline plus 10 min grace; a funded
+  # deal auto-releases on its date, only to a verified payout account; holds on business deals expire; a
+  # release payout that fails or reverses is retried up to 3 times, 30 min apart, then admins pay by hand.
+  # Worker jobs plus checkout (api) both read them. Emergency stop without a deploy: JOBS_DISABLED_KINDS=escrow.api_*.
+  BUSINESS_PAYMENT_EXPIRY_ENABLED: "true"
+  BUSINESS_AUTO_RELEASE_ENABLED: "true"
+  BUSINESS_HOLD_EXPIRY_ENABLED: "true"
+  BUSINESS_PAYOUT_RETRY_ENABLED: "true"
+  # Auth. A refresh token replayed inside the grace window (a second tab) is answered again.
+  REFRESH_REPLAY_REISSUE: "true"
+  # Access token as an HttpOnly cookie, beside the bearer header: "dual" = both work, so the web build that
+  # sends the cookie and every API client keep working. Order: this PR first, then the web image built with
+  # NEXT_PUBLIC_AUTH_COOKIE_MODE=on. Boot guard (boot_guard.py _cookie_mode_problems): REFRESH_COOKIE_SECURE
+  # true (default) and https-only BACKEND_CORS_ORIGINS (both true here). Unlocks the web "Active sessions"
+  # screen. Rollback: "off" (the web falls back to bearer on its next sign-in).
+  ACCESS_COOKIE_MODE: "dual"
+  # Email the owner when a sign-in comes from a device not seen before, with a "This wasn't me" link.
+  NEW_DEVICE_ALERTS_ENABLED: "true"
+  # NOT switched on here: MFA_RECOVERY_SELF_SERVE (lost second factor, Tier 2+ selfie). It needs a Dojah
+  # selfie widget id built into the web image (NEXT_PUBLIC_DOJAH_MFA_WIDGET_ID); without it a Tier 2+ user who
+  # lost every factor is parked in "identity check" with no way to finish. Add it with the widget id.
+  # Not touched on purpose, awaiting Adebayo: IDENTITY_RELEASE_ENABLED, RATINGS_PUBLIC_READ.
+
   # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
   # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
   # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.

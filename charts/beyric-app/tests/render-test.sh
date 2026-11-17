@@ -13,7 +13,7 @@ helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/value
 # Rollback stops the worker in git with replicas: 0; it must render 0, not the default.
 helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.replicas=0 > /tmp/beyric-app-api-worker-zero.yaml
 python3 - <<'PY'
-import yaml, sys
+import yaml, sys, json
 def load(p): return [d for d in yaml.safe_load_all(open(p)) if d]
 api, web = load('/tmp/beyric-app-api.yaml'), load('/tmp/beyric-app-web.yaml')
 def one(docs, kind, name):
@@ -43,6 +43,24 @@ for name in ('api', 'api-worker'):
     # while REFRESH_COOKIE_SECURE is false. Unset means the API default (true).
     if e.get('COOKIE_HOST_PREFIX') == 'true':
         check(e.get('REFRESH_COOKIE_SECURE', 'true') != 'false', f'{name}: COOKIE_HOST_PREFIX needs REFRESH_COOKIE_SECURE=true (else the flag does nothing)')
+    # Mirrors Weysure-API app/core/config.py _chargeback_settings_are_coherent: enforce needs origin rules.
+    if e.get('CHARGEBACKS_MODE') == 'enforce':
+        check(e.get('ORIGIN_RULES_ENFORCED') == 'true', f'{name}: CHARGEBACKS_MODE=enforce needs ORIGIN_RULES_ENFORCED=true (the API refuses to boot)')
+    # Mirrors app/core/boot_guard.py _cookie_mode_problems: the access cookie must be Secure and CORS https-only.
+    if e.get('ACCESS_COOKIE_MODE', 'off') != 'off':
+        check(e.get('REFRESH_COOKIE_SECURE', 'true') != 'false', f'{name}: ACCESS_COOKIE_MODE needs REFRESH_COOKIE_SECURE=true')
+        check(all(o.startswith('https://') for o in json.loads(e.get('BACKEND_CORS_ORIGINS', '[]'))), f'{name}: ACCESS_COOKIE_MODE needs https-only BACKEND_CORS_ORIGINS')
+    # app/core/config.py: self-serve MFA recovery needs MFA on.
+    if e.get('MFA_RECOVERY_SELF_SERVE') == 'true':
+        check(e.get('MFA_ENABLED') == 'true', f'{name}: MFA_RECOVERY_SELF_SERVE needs MFA_ENABLED=true')
+    # 2026-11-17 (Adebayo: switch everything on): no feature stays dark. Both pod types carry every switch.
+    # Not asserted on purpose: MFA_RECOVERY_SELF_SERVE (needs a Dojah selfie widget id in the web image),
+    # IDENTITY_RELEASE_ENABLED and RATINGS_PUBLIC_READ (policy choices, not dark features).
+    on = ('CHARGEBACK_AUTO_RESPOND_ENABLED', 'SOURCE_REFUND_RETRY_ENABLED', 'DEAL_INVITES_ENABLED', 'BUSINESS_PAYMENT_EXPIRY_ENABLED',
+          'BUSINESS_AUTO_RELEASE_ENABLED', 'BUSINESS_HOLD_EXPIRY_ENABLED', 'BUSINESS_PAYOUT_RETRY_ENABLED', 'REFRESH_REPLAY_REISSUE',
+          'NEW_DEVICE_ALERTS_ENABLED')
+    check(all(e.get(k) == 'true' for k in on), f'{name}: every switched-on feature flag is "true": {[k for k in on if e.get(k) != "true"]}')
+    check(e.get('CHARGEBACKS_MODE') == 'enforce' and e.get('ACCESS_COOKIE_MODE') == 'dual', f'{name}: chargebacks enforce, access cookie dual (bearer and cookie both work)')
 check(dep['spec']['replicas']==2 and dep['spec']['strategy']['rollingUpdate']['maxUnavailable']==0, 'api 2 replicas, maxUnavailable 0')
 a=pod['metadata']['annotations']
 check(a.get('vault.hashicorp.com/agent-inject')=='true' and a.get('vault.hashicorp.com/role')=='weysure-api', 'api pod has vault agent annotations')
