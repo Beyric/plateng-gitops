@@ -5,6 +5,6 @@
 # Tags are git SHAs, never :latest (Finding 11). ECR is IMMUTABLE, so a tag
 # here names exactly one image forever.
 api:
-  tag: "beadbd6186d6"
+  tag: "a3005ddcbaab"
 web:
   tag: "e94633e55ff5"
