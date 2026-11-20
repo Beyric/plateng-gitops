@@ -1,0 +1,445 @@
+# ONE-SHOT, HAND-APPLIED, DESTRUCTIVE. Deliberately NOT under projects/weysure/environments/prod: Argo CD
+# syncs that path (recurse, automated), so a Job placed there would run the moment its PR merges. This file
+# is outside every Argo path; nothing applies it but the person who runs scripts/db-reset-prod.sh
+# (plateng-infrastructure-tools) or the `kubectl create` in the runbook. Merging the PR that holds this
+# file changes nothing in the cluster.
+#
+# What it does: wipes every Weysure table except the config tables and the owner's admin account
+# (beyrichq@gmail.com + its second factors), in ONE transaction, after guards. DRY_RUN=true (the value in
+# this file) runs everything and ROLLS BACK, printing the per-table before/after counts. The real run
+# differs in two places only: DRY_RUN "false" and the Job name. The script does both substitutions.
+# Table classification, assumptions and open questions:
+#   plateng-infrastructure-tools  projects/weysure/docs/sop/2026-11-20-prod-data-reset.md
+# Runbook: projects/weysure/docs/runbooks/PROD_DATA_RESET.md (same repo).
+#
+# Identity: exactly the PreSync migration's - ServiceAccount db-migrate, Vault role weysure-migrate (30-minute
+# credential, member of weysure_owner, which owns every table). weysure_app (the API) has no TRUNCATE
+# privilege and the RDS master is not needed, so this is the least privilege that can do the job.
+# NetworkPolicy: label app.kubernetes.io/name=db-migrate is what allows RDS and Vault (network/allow.yaml).
+# Not an Argo hook, no instance label: Argo never owns it, never re-runs it, never prunes it.
+# Proven locally on postgres:16 against the real schema (alembic head c9e1f3a5b7d2): see the SOP.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-reset-prod-v1
+  namespace: weysure-prod
+  labels:
+    app.kubernetes.io/name: db-migrate
+    beyric.io/job: db-reset
+spec:
+  backoffLimit: 0                       # a destructive Job is never retried automatically
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 604800       # a week, for `kubectl logs`; Loki keeps the output too
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        beyric.io/job: db-reset
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "weysure-migrate"
+        vault.hashicorp.com/agent-inject-secret-env: "database/creds/weysure-migrate"
+        vault.hashicorp.com/agent-inject-template-env: |
+          {{- with secret "database/creds/weysure-migrate" -}}
+          DATABASE_URL=postgresql://{{ .Data.username }}:{{ .Data.password }}@weysure-postgres-v2.cm7yqww8uycm.us-east-1.rds.amazonaws.com:5432/weysure?sslmode=require
+          {{- end }}
+        vault.hashicorp.com/agent-limits-cpu: "100m"
+        vault.hashicorp.com/agent-limits-mem: "64Mi"
+        vault.hashicorp.com/agent-requests-cpu: "20m"
+        vault.hashicorp.com/agent-requests-mem: "32Mi"
+        vault.hashicorp.com/agent-run-as-same-user: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: db-migrate
+      nodeSelector:
+        node-role: workload
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reset
+          image: postgres:16.16-alpine3.23@sha256:a23cda8ed4733a74cd0a328fcb525a43c35cdbaa845b6fdb8f343646f995cc1e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - { name: VAULT_ENV_FILE, value: "/vault/secrets/env" }
+            - { name: HOME, value: /tmp }
+            - { name: DRY_RUN, value: "true" }             # the script sets "false" for the real run
+            - { name: OWNER_EMAIL, value: "beyrichq@gmail.com" }
+            - { name: EXPECT_DB, value: "weysure" }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              # DATABASE_URL comes from the Vault file and is never printed.
+              set -a; . "$VAULT_ENV_FILE"; set +a
+              cat > /tmp/reset.sql <<'SQL'
+              -- WEYSURE production data reset (db-reset-prod-v1)
+              -- Wipes every row of every table EXCEPT: the reference/config tables (class keep) and the owner's
+              -- admin account with its second factors (class owner). One transaction. DRY_RUN rolls it back.
+              --
+              -- Parameters (psql -v):  dry_run (true|false, default true)   owner_email   expect_db
+              -- Classes:  keep  = rows stay (migration version + admin-set config)
+              --           owner = only the rows of the owner's admin stay (admins, mfa_factors, mfa_recovery_codes)
+              --           audit = admin_audit_logs: everything goes except earlier 'production_data_reset' rows by the owner,
+              --                   then one new such row is written
+              --           wipe  = every row goes (TRUNCATE ... RESTART IDENTITY, no CASCADE: if a table were
+              --                   missing from this list Postgres would refuse, not silently empty another)
+              -- Idempotent: when there is nothing left to remove it changes nothing (no new audit row).
+              \set ON_ERROR_STOP on
+              \if :{?dry_run} \else \set dry_run true \endif
+              \if :{?owner_email} \else \set owner_email 'beyrichq@gmail.com' \endif
+              \if :{?expect_db} \else \set expect_db 'weysure' \endif
+
+              -- DRY_RUN must be exactly true or false. Anything else stops here, before a transaction exists.
+              SELECT lower(:'dry_run') IN ('true', 'false') AS dry_run_valid,
+                     lower(:'dry_run') = 'false'            AS do_commit \gset
+              \if :dry_run_valid
+              \else
+                DO $$ BEGIN RAISE EXCEPTION 'REFUSED: DRY_RUN must be exactly true or false'; END $$;
+              \endif
+
+              \echo
+              \echo '=== WEYSURE production data reset ==='
+              \if :do_commit
+                \echo 'MODE: REAL RUN. Rows will be deleted and the transaction committed.'
+              \else
+                \echo 'MODE: DRY RUN. Everything below runs, then ROLLS BACK. Nothing is changed.'
+              \endif
+
+              BEGIN;
+              SET LOCAL lock_timeout = '30s';
+              SET LOCAL statement_timeout = '5min';
+              SET LOCAL idle_in_transaction_session_timeout = '10min';
+
+              SELECT set_config('reset.owner_email', lower(:'owner_email'), true) AS owner_email,
+                     set_config('reset.expect_db', :'expect_db', true)            AS expect_db \gset _
+
+              CREATE TEMP TABLE reset_class (
+                tbl text PRIMARY KEY,
+                cls text NOT NULL CHECK (cls IN ('keep', 'owner', 'audit', 'wipe'))
+              );
+              INSERT INTO reset_class (tbl, cls) VALUES
+               ('alembic_version','keep'),
+               ('settings','keep'),
+               ('delivery_method_settings','keep'),
+               ('kyc_tier_limits','keep'),
+               ('risk_hold_settings','keep'),
+               ('escrow_settings','keep'),
+               ('admins','owner'),
+               ('mfa_factors','owner'),
+               ('mfa_recovery_codes','owner'),
+               ('admin_audit_logs','audit'),
+               ('account_freezes','wipe'),
+               ('admin_notification_states','wipe'),
+               ('admin_notifications','wipe'),
+               ('api_keys','wipe'),
+               ('auth_sessions','wipe'),
+               ('bank_account_audit_logs','wipe'),
+               ('bank_account_change_requests','wipe'),
+               ('bank_accounts','wipe'),
+               ('business_documents','wipe'),
+               ('business_events','wipe'),
+               ('business_limits','wipe'),
+               ('business_profiles','wipe'),
+               ('chargeback_cases','wipe'),
+               ('chargeback_events','wipe'),
+               ('chargeback_recoveries','wipe'),
+               ('deal_invites','wipe'),
+               ('dedicated_accounts','wipe'),
+               ('developer_escrow_settings','wipe'),
+               ('dispute_audit_logs','wipe'),
+               ('disputes','wipe'),
+               ('dva_bvn_attempts','wipe'),
+               ('dva_credits','wipe'),
+               ('dva_return_requests','wipe'),
+               ('escrow_transaction_history','wipe'),
+               ('escrow_transactions','wipe'),
+               ('identity_fingerprints','wipe'),
+               ('jobs','wipe'),
+               ('kyc_limit_overrides','wipe'),
+               ('kyc_records','wipe'),
+               ('kyc_reviews','wipe'),
+               ('manual_payout_requests','wipe'),
+               ('message_threads','wipe'),
+               ('messages','wipe'),
+               ('mfa_challenges','wipe'),
+               ('mfa_recovery_requests','wipe'),
+               ('notifications','wipe'),
+               ('otp_codes','wipe'),
+               ('partner_commission_entries','wipe'),
+               ('partner_commission_rules','wipe'),
+               ('partner_statements','wipe'),
+               ('partner_users','wipe'),
+               ('partners','wipe'),
+               ('payment_methods','wipe'),
+               ('payout_account_audit_logs','wipe'),
+               ('payout_account_change_requests','wipe'),
+               ('ratings','wipe'),
+               ('refresh_tokens','wipe'),
+               ('risk_signal_sightings','wipe'),
+               ('security_audit_logs','wipe'),
+               ('source_refunds','wipe'),
+               ('support_tickets','wipe'),
+               ('trusted_devices','wipe'),
+               ('usage_logs','wipe'),
+               ('user_sessions','wipe'),
+               ('users','wipe'),
+               ('wallet_holds','wipe'),
+               ('wallet_lot_allocations','wipe'),
+               ('wallet_lots','wipe'),
+               ('wallet_transactions','wipe'),
+               ('webhook_deliveries','wipe'),
+               ('webhooks','wipe'),
+               ('withdrawals','wipe');
+
+              -- ---------------------------------------------------------------------------------------------
+              -- GUARDS: any failure raises, psql stops (exit 3) and the transaction is rolled back.
+              -- ---------------------------------------------------------------------------------------------
+              DO $guard$
+              DECLARE
+                v_email   text := current_setting('reset.owner_email');
+                v_db      text := current_setting('reset.expect_db');
+                v_admin   record;
+                n         bigint;
+                v_unknown text;
+                v_missing text;
+                v_factors bigint;
+                v_codes   bigint;
+              BEGIN
+                IF current_database() <> v_db THEN
+                  RAISE EXCEPTION 'REFUSED: connected to database "%", this reset is for "%"', current_database(), v_db;
+                END IF;
+                IF v_email NOT LIKE '%_@_%' THEN
+                  RAISE EXCEPTION 'REFUSED: owner_email "%" is not an email address', v_email;
+                END IF;
+
+                -- Every table in the database must be classified above: a new table added by a later migration
+                -- stops the reset until someone decides what it is.
+                SELECT string_agg(tablename, ', ' ORDER BY tablename) INTO v_unknown
+                  FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN (SELECT tbl FROM reset_class);
+                IF v_unknown IS NOT NULL THEN
+                  RAISE EXCEPTION 'REFUSED: tables not classified in this script: %', v_unknown;
+                END IF;
+                SELECT string_agg(c.tbl, ', ' ORDER BY c.tbl) INTO v_missing
+                  FROM reset_class c LEFT JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = c.tbl
+                 WHERE t.tablename IS NULL AND c.cls <> 'wipe';
+                IF v_missing IS NOT NULL THEN
+                  RAISE EXCEPTION 'REFUSED: tables this script must keep are missing: %', v_missing;
+                END IF;
+                IF (SELECT count(*) FROM public.alembic_version) <> 1 THEN
+                  RAISE EXCEPTION 'REFUSED: alembic_version must hold exactly 1 row';
+                END IF;
+                -- This database user must be able to do the work (the API's own user cannot TRUNCATE).
+                SELECT string_agg(c.tbl, ', ' ORDER BY c.tbl) INTO v_missing
+                  FROM reset_class c JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = c.tbl
+                 WHERE (c.cls = 'wipe' AND NOT has_table_privilege(current_user, format('public.%I', c.tbl), 'TRUNCATE'))
+                    OR (c.cls IN ('owner', 'audit') AND NOT has_table_privilege(current_user, format('public.%I', c.tbl), 'DELETE'))
+                    OR (c.cls = 'keep' AND c.tbl <> 'alembic_version' AND NOT has_table_privilege(current_user, format('public.%I', c.tbl), 'UPDATE'));
+                IF v_missing IS NOT NULL THEN
+                  RAISE EXCEPTION 'REFUSED: database user "%" lacks the privilege this reset needs on: %', current_user, v_missing;
+                END IF;
+
+                -- The owner's admin: exactly one, active, a superadmin, password set, with a usable second factor.
+                SELECT count(*) INTO n FROM public.admins WHERE lower(email) = v_email;
+                IF n <> 1 THEN
+                  RAISE EXCEPTION 'REFUSED: expected exactly 1 admin with email %, found %', v_email, n;
+                END IF;
+                SELECT * INTO v_admin FROM public.admins WHERE lower(email) = v_email;
+                IF NOT coalesce(v_admin.is_active, false) THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin is not active';
+                END IF;
+                IF v_admin.role <> 'superadmin' THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin is "%", not "superadmin"', v_admin.role;
+                END IF;
+                IF v_admin.password_pending THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin has not set a password yet (invite pending)';
+                END IF;
+                SELECT count(*) INTO n FROM public.mfa_factors
+                 WHERE subject_type = 'admin' AND subject_id = v_admin.id AND confirmed_at IS NOT NULL AND disabled_at IS NULL;
+                IF n < 1 THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin has no confirmed second factor; enrol one in the console first';
+                END IF;
+                v_factors := n;
+                -- After the reset the owner is the ONLY admin, and the console refuses a self-reset of one's own second
+                -- factors (CANNOT_RESET_SELF): lose every factor and nobody can rescue the account except a platform
+                -- break-glass Job or a snapshot restore. So he must hold an unused recovery code to fall back on.
+                SELECT count(*) INTO v_codes FROM public.mfa_recovery_codes
+                 WHERE subject_type = 'admin' AND subject_id = v_admin.id AND used_at IS NULL;
+                IF v_codes < 1 THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin has no unused recovery code. After the reset nobody else could rescue the account; generate new recovery codes in the console first';
+                END IF;
+                IF v_factors < 2 THEN
+                  RAISE NOTICE 'WARNING: the owner has only % second factor. Enrol a second one (passkey + authenticator app) before going live', v_factors;
+                END IF;
+                RAISE NOTICE 'guard passed: database %, 1 owner admin, % active second factor(s), % unused recovery code(s), user %', v_db, v_factors, v_codes, current_user;
+              END
+              $guard$;
+
+              SELECT id AS owner_id FROM public.admins WHERE lower(email) = lower(:'owner_email') \gset
+
+              -- ---------------------------------------------------------------------------------------------
+              -- BEFORE counts (exact, per table)
+              -- ---------------------------------------------------------------------------------------------
+              CREATE TEMP TABLE reset_counts (tbl text NOT NULL, phase text NOT NULL, n bigint NOT NULL, PRIMARY KEY (tbl, phase));
+              CREATE FUNCTION pg_temp.reset_snapshot(p_phase text) RETURNS void LANGUAGE plpgsql AS $f$
+              DECLARE r record; c bigint;
+              BEGIN
+                FOR r IN SELECT k.tbl FROM reset_class k JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = k.tbl LOOP
+                  EXECUTE format('SELECT count(*) FROM public.%I', r.tbl) INTO c;
+                  INSERT INTO reset_counts VALUES (r.tbl, p_phase, c);
+                END LOOP;
+              END
+              $f$;
+              DO $$ BEGIN PERFORM pg_temp.reset_snapshot('before'); END $$;
+              SELECT (SELECT count(*) FROM public.mfa_factors        WHERE subject_type = 'admin' AND subject_id = :'owner_id') AS owner_factors,
+                     (SELECT count(*) FROM public.mfa_recovery_codes WHERE subject_type = 'admin' AND subject_id = :'owner_id') AS owner_codes \gset
+
+              -- Is there anything to remove? (what makes a second run a no-op)
+              SELECT (
+                  (SELECT coalesce(sum(b.n), 0) FROM reset_counts b JOIN reset_class k USING (tbl) WHERE b.phase = 'before' AND k.cls = 'wipe')
+                + (SELECT count(*) FROM public.admins WHERE id <> :'owner_id')
+                + (SELECT count(*) FROM public.mfa_factors WHERE NOT (subject_type = 'admin' AND subject_id = :'owner_id'))
+                + (SELECT count(*) FROM public.mfa_recovery_codes WHERE NOT (subject_type = 'admin' AND subject_id = :'owner_id'))
+                + (SELECT count(*) FROM public.admin_audit_logs WHERE action <> 'production_data_reset' OR admin_id IS DISTINCT FROM :'owner_id')
+              ) > 0 AS has_work \gset
+
+              \if :has_work
+                -- 1. Config rows must not point at admins that are about to be deleted.
+                UPDATE public.kyc_tier_limits       SET updated_by_admin_id = NULL WHERE updated_by_admin_id IS NOT NULL AND updated_by_admin_id <> :'owner_id';
+                UPDATE public.risk_hold_settings    SET updated_by_id       = NULL WHERE updated_by_id       IS NOT NULL AND updated_by_id       <> :'owner_id';
+                UPDATE public.delivery_method_settings SET updated_by_id    = NULL WHERE updated_by_id       IS NOT NULL AND updated_by_id       <> :'owner_id';
+                UPDATE public.escrow_settings       SET updated_by_id       = NULL WHERE updated_by_id       IS NOT NULL AND updated_by_id       <> :'owner_id';
+
+                -- 2. Wipe: the explicit list of class 'wipe' tables, in one statement (shown below as run).
+                SELECT string_agg(format('public.%I', k.tbl), ', ' ORDER BY k.tbl) AS wipe_list
+                  FROM reset_class k JOIN pg_tables t ON t.schemaname = 'public' AND t.tablename = k.tbl
+                 WHERE k.cls = 'wipe' \gset
+                \echo 'TRUNCATE ' :wipe_list ' RESTART IDENTITY;'
+                TRUNCATE :wipe_list RESTART IDENTITY;
+
+                -- 3. Audit log: earlier reset records written by the owner stay, everything else goes.
+                DELETE FROM public.admin_audit_logs WHERE action <> 'production_data_reset' OR admin_id IS DISTINCT FROM :'owner_id';
+
+                -- 4. Second factors and recovery codes: only the owner's stay.
+                DELETE FROM public.mfa_factors        WHERE NOT (subject_type = 'admin' AND subject_id = :'owner_id');
+                DELETE FROM public.mfa_recovery_codes WHERE NOT (subject_type = 'admin' AND subject_id = :'owner_id');
+
+                -- 5. Every other admin.
+                DELETE FROM public.admins WHERE id <> :'owner_id';
+
+                -- 6. The record of this reset.
+                INSERT INTO public.admin_audit_logs (id, admin_id, action, target_user_id, "timestamp", details)
+                VALUES (gen_random_uuid()::text, :'owner_id', 'production_data_reset', NULL, now() AT TIME ZONE 'utc',
+                        'production data reset, kept 1 admin');
+              \endif
+
+              DO $$ BEGIN PERFORM pg_temp.reset_snapshot('after'); END $$;
+
+              -- ---------------------------------------------------------------------------------------------
+              -- Post-conditions: if any is false the transaction is rolled back, even in a real run.
+              -- ---------------------------------------------------------------------------------------------
+              SELECT set_config('reset.owner_id', :'owner_id', true)                   AS owner_id,
+                     set_config('reset.owner_factors', :'owner_factors', true)         AS owner_factors,
+                     set_config('reset.owner_codes', :'owner_codes', true)             AS owner_codes \gset _
+              DO $post$
+              DECLARE
+                v_owner text := current_setting('reset.owner_id');
+                bad text;
+              BEGIN
+                SELECT string_agg(k.tbl || ' (' || b.n || ' before, ' || a.n || ' after)', ', ' ORDER BY k.tbl) INTO bad
+                  FROM reset_class k
+                  JOIN reset_counts b ON b.tbl = k.tbl AND b.phase = 'before'
+                  JOIN reset_counts a ON a.tbl = k.tbl AND a.phase = 'after'
+                 WHERE (k.cls = 'keep' AND a.n <> b.n) OR (k.cls = 'wipe' AND a.n <> 0);
+                IF bad IS NOT NULL THEN
+                  RAISE EXCEPTION 'POST-CHECK FAILED (a kept table changed or a wiped table is not empty): %', bad;
+                END IF;
+                IF (SELECT count(*) FROM public.admins) <> 1 OR NOT EXISTS (SELECT 1 FROM public.admins WHERE id = v_owner) THEN
+                  RAISE EXCEPTION 'POST-CHECK FAILED: admins must hold exactly the owner';
+                END IF;
+                IF (SELECT count(*) FROM public.mfa_factors) <> current_setting('reset.owner_factors')::bigint
+                   OR (SELECT count(*) FROM public.mfa_factors WHERE subject_type = 'admin' AND subject_id = v_owner) <> current_setting('reset.owner_factors')::bigint THEN
+                  RAISE EXCEPTION 'POST-CHECK FAILED: mfa_factors must hold exactly the owner''s factors, unchanged';
+                END IF;
+                IF (SELECT count(*) FROM public.mfa_recovery_codes) <> current_setting('reset.owner_codes')::bigint
+                   OR (SELECT count(*) FROM public.mfa_recovery_codes WHERE subject_type = 'admin' AND subject_id = v_owner) <> current_setting('reset.owner_codes')::bigint THEN
+                  RAISE EXCEPTION 'POST-CHECK FAILED: mfa_recovery_codes must hold exactly the owner''s codes, unchanged';
+                END IF;
+                IF EXISTS (SELECT 1 FROM public.admin_audit_logs WHERE action <> 'production_data_reset' OR admin_id IS DISTINCT FROM v_owner) THEN
+                  RAISE EXCEPTION 'POST-CHECK FAILED: admin_audit_logs holds rows other than the owner''s reset records';
+                END IF;
+              END
+              $post$;
+
+              -- ---------------------------------------------------------------------------------------------
+              -- REPORT
+              -- ---------------------------------------------------------------------------------------------
+              \echo
+              \echo '--- per table: class (keep / owner / audit / wipe), rows before, rows after ---'
+              SELECT k.cls AS class, k.tbl AS "table", b.n AS before, a.n AS after
+                FROM reset_class k
+                JOIN reset_counts b ON b.tbl = k.tbl AND b.phase = 'before'
+                JOIN reset_counts a ON a.tbl = k.tbl AND a.phase = 'after'
+               ORDER BY CASE k.cls WHEN 'keep' THEN 1 WHEN 'owner' THEN 2 WHEN 'audit' THEN 3 ELSE 4 END, k.tbl;
+              SELECT k.cls AS class, count(*) AS tables, sum(b.n) AS rows_before, sum(a.n) AS rows_after
+                FROM reset_class k
+                JOIN reset_counts b ON b.tbl = k.tbl AND b.phase = 'before'
+                JOIN reset_counts a ON a.tbl = k.tbl AND a.phase = 'after'
+               GROUP BY k.cls ORDER BY k.cls;
+
+              \echo
+              \echo '--- what stays: the owner admin (no password hash, no secrets) ---'
+              SELECT id, email, role, is_active, password_pending FROM public.admins;
+              SELECT kind, label, confirmed_at IS NOT NULL AS confirmed, disabled_at IS NOT NULL AS disabled
+                FROM public.mfa_factors ORDER BY created_at;
+              \echo '--- what stays: config the platform runs on (check these are the values you want live) ---'
+              SELECT key, value FROM public.settings ORDER BY key;
+              SELECT tier, buy_per_escrow, buy_30d, topup_30d, out_30d FROM public.kyc_tier_limits ORDER BY tier;
+              SELECT method, deadline_hours, auto_release_hours FROM public.delivery_method_settings ORDER BY method;
+              SELECT platform_fee_percentage, platform_fee_minimum, platform_fee_maximum, weysure_processing_fee,
+                     default_auto_release_days, payment_expiry_hours, is_active FROM public.escrow_settings;
+              SELECT version_num AS alembic_version FROM public.alembic_version;
+
+              \if :has_work
+                \if :do_commit
+                  COMMIT;
+                  \echo 'RESET_COMMITTED: all other data is gone. Scale api-worker back up next (see the runbook).'
+                \else
+                  ROLLBACK;
+                  \echo 'RESET_DRY_RUN_ROLLED_BACK: nothing was changed. The "after" column above is what a real run would leave.'
+                \endif
+              \else
+                \if :do_commit
+                  COMMIT;
+                \else
+                  ROLLBACK;
+                \endif
+                \echo 'NOTHING_TO_RESET: the database already holds only the kept rows. No change was made (no new audit row).'
+              \endif
+              SQL
+              psql -X -q -v ON_ERROR_STOP=1 \
+                -v dry_run="$DRY_RUN" -v owner_email="$OWNER_EMAIL" -v expect_db="$EXPECT_DB" \
+                "$DATABASE_URL" -f /tmp/reset.sql
+              rm -f /tmp/reset.sql
+              echo "db-reset-prod-v1 finished (DRY_RUN=$DRY_RUN)"
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
