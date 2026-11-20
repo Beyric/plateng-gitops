@@ -1,0 +1,117 @@
+# Nightly, encrypted, off-AWS backup of the Weysure database (owner request 2026-11-20: a copy he
+# keeps outside AWS, so he can move to another cloud at any time without losing data).
+#
+#   02:30 UTC   an hour before the RDS backup window (03:00-04:00) and after the Vault snapshot (02:00)
+#   stage 1     pg_dump (custom format, as the read-only role weysure_backup) | age (owner's PUBLIC key)
+#               -> /scratch/<name>.dump.age        plaintext is a pipe, never a file
+#   stage 2     rclone -> Google Drive, verify size + MD5 on Drive, keep 30 daily + 12 monthly
+#
+# The age PRIVATE key is held only by the owner (password manager). Without it the objects on Drive,
+# and the copies in this pod's scratch space, cannot be read - by us, by Google, or by an attacker.
+# Restore: plateng-infrastructure-tools projects/weysure/docs/runbooks/DB_OFFSITE_BACKUP.md
+# Alert: WeysureDbBackupMissing (no success in 26 h) in platform/monitoring/alerts.yaml.
+# Success line in the logs:  kubectl -n weysure-prod logs job/<name> -c upload-retain | grep BACKUP_OK
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weysure-db-backup
+  namespace: weysure-prod
+automountServiceAccountToken: false     # the backup never talks to the Kubernetes API
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weysure-db-backup
+  namespace: weysure-prod
+spec:
+  schedule: "30 2 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600        # a missed 02:30 (node roll) still runs within the hour
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1                  # one retry for a transient fault; the alert covers the rest
+      activeDeadlineSeconds: 3600      # raise if the database ever takes longer than this to dump
+      template:
+        metadata:
+          labels: { app.kubernetes.io/name: db-backup }     # selected by the db-backup-egress NetworkPolicy
+        spec:
+          serviceAccountName: weysure-db-backup
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          # System nodes: always there, so the backup does not wait for a spot node to launch (same as
+          # vault-snapshot). They are arm64 today and workload nodes amd64: both images are multi-arch and
+          # the age download picks the matching binary.
+          nodeSelector: { node-role: system }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          volumes:
+            # Disk, not Memory: the encrypted dump grows with the database and must not count against the
+            # container's memory limit. Deleted with the pod, success or failure. 5Gi = headroom for a
+            # database of several GiB; the pod is evicted (job fails, alert fires) rather than fill a node.
+            - name: scratch
+              emptyDir: { sizeLimit: 5Gi }
+            - name: scripts
+              configMap: { name: weysure-db-backup-scripts }       # run as `sh /scripts/...`, so no exec bit needed
+          initContainers:
+            - name: dump-encrypt
+              image: postgres:16.16-alpine3.23@sha256:a23cda8ed4733a74cd0a328fcb525a43c35cdbaa845b6fdb8f343646f995cc1e
+              securityContext: &sc
+                allowPrivilegeEscalation: false
+                privileged: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                capabilities: { drop: [ALL] }
+              env:
+                - { name: PGHOST, value: weysure-postgres-v2.cm7yqww8uycm.us-east-1.rds.amazonaws.com }
+                - { name: PGPORT, value: "5432" }
+                - { name: PGDATABASE, value: weysure }
+                - { name: PGUSER, value: weysure_backup }
+                - { name: PGSSLMODE, value: require }
+                - { name: PGCONNECT_TIMEOUT, value: "15" }
+                - { name: HOME, value: /scratch }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: weysure-backup, key: PGPASSWORD } }
+                - name: AGE_RECIPIENT
+                  valueFrom: { secretKeyRef: { name: weysure-backup, key: AGE_RECIPIENT } }
+              command: ["sh", "/scripts/dump-encrypt.sh"]
+              resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+              volumeMounts:
+                - { name: scratch, mountPath: /scratch }
+                - { name: scripts, mountPath: /scripts, readOnly: true }
+          containers:
+            - name: upload-retain
+              image: rclone/rclone:1.75.2@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5
+              securityContext: *sc
+              env:
+                - { name: HOME, value: /scratch }
+                - { name: TMPDIR, value: /scratch }
+                - { name: RCLONE_CONFIG, value: /scratch/rclone.conf }
+                # The remote "gdrive" is defined entirely by environment variables (no config file in git or
+                # in the image). drive.file = rclone sees only the files it created itself, nothing else in
+                # the owner's Drive. The folder is created by the owner's own rclone (runbook step).
+                - { name: RCLONE_CONFIG_GDRIVE_TYPE, value: drive }
+                - { name: RCLONE_CONFIG_GDRIVE_SCOPE, value: drive.file }
+                - { name: BACKUP_REMOTE, value: "gdrive:weysure-db-backups" }
+                - { name: RCLONE_TRANSFERS, value: "1" }
+                - { name: RCLONE_DRIVE_CHUNK_SIZE, value: 32Mi }
+                - { name: RCLONE_STATS, value: "0" }
+                - name: RCLONE_CONFIG_GDRIVE_TOKEN
+                  valueFrom: { secretKeyRef: { name: weysure-backup, key: RCLONE_CONFIG_GDRIVE_TOKEN } }
+                # The owner's own Google OAuth client (required: rclone's shared client_id is being retired
+                # during 2026, and the token above only refreshes against the client that issued it).
+                - name: RCLONE_CONFIG_GDRIVE_CLIENT_ID
+                  valueFrom: { secretKeyRef: { name: weysure-backup, key: RCLONE_CONFIG_GDRIVE_CLIENT_ID } }
+                - name: RCLONE_CONFIG_GDRIVE_CLIENT_SECRET
+                  valueFrom: { secretKeyRef: { name: weysure-backup, key: RCLONE_CONFIG_GDRIVE_CLIENT_SECRET } }
+              command: ["sh", "/scripts/upload-retain.sh"]
+              resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 512Mi } }
+              volumeMounts:
+                - { name: scratch, mountPath: /scratch }
+                - { name: scripts, mountPath: /scripts, readOnly: true }

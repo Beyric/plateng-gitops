@@ -206,3 +206,23 @@ spec:
           annotations:
             summary: "{{ $labels.job }} is down"
             runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#monitoringstackdegraded
+    - name: beyric.backup
+      rules:
+        - alert: WeysureDbBackupMissing
+          # The nightly encrypted copy of the database that lives OUTSIDE AWS (Google Drive). RDS keeps its own 7-day
+          # snapshots; this alert is about the copy the owner can take to another cloud. Fires 26 h after the last
+          # success (a night plus two hours of slack), or - if it has never succeeded - 26 h after the CronJob was
+          # created, so merging the change does not page before the first 02:30 run has had its chance.
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{namespace="weysure-prod", cronjob="weysure-db-backup"}) > 26 * 3600
+            or
+            (
+              absent(kube_cronjob_status_last_successful_time{namespace="weysure-prod", cronjob="weysure-db-backup"})
+              and on() (time() - max(kube_cronjob_created{namespace="weysure-prod", cronjob="weysure-db-backup"})) > 26 * 3600
+            )
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "No successful off-AWS database backup in the last 26 hours"
+            description: "The nightly CronJob weysure-prod/weysure-db-backup (02:30 UTC, pg_dump -> age -> Google Drive) has not succeeded. The newest copy outside AWS is more than a day old. RDS's own snapshots are unaffected."
+            runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#weysuredbbackupmissing

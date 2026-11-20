@@ -98,6 +98,27 @@ spec:
     - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]
       ports: [{ protocol: TCP, port: 80 }]
 ---
+# Nightly off-AWS database backup (CronJob weysure-db-backup, label app.kubernetes.io/name=db-backup):
+# RDS in the VPC (pg_dump), then HTTPS to the internet - Google Drive (www.googleapis.com,
+# oauth2.googleapis.com, accounts.google.com) and the age release download (github.com).
+# The VPC CNI network-policy agent matches IP/CIDR and pod/namespace selectors only, never DNS names,
+# and Google's API addresses are a large, changing anycast range that cannot be listed. So, exactly like
+# api-egress and db-maintenance-egress above, 443 is open to everything outside the VPC. What narrows it
+# here: only this pod (not api/web/redis), only TCP 443 and 5432, no Vault, no Kubernetes API, no SMTP,
+# and the pod runs only the pinned, reviewed script. A name-based allowlist needs an egress proxy or an
+# FQDN-aware CNI (follow-up in the SOP).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: db-backup-egress, namespace: weysure-prod }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: db-backup } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 10.0.0.0/16 } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/16] } }]
+      ports: [{ protocol: TCP, port: 443 }]
+---
 # Phase 9: the monitoring namespace may reach api and web (Blackbox internal
 # probes; app /metrics when the developers add one).
 apiVersion: networking.k8s.io/v1

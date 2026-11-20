@@ -44,6 +44,62 @@ tests:
               summary: "stuck has been draining for over 1 hour"
               description: "A pod Karpenter will not evict (karpenter.sh/do-not-disrupt) is holding the node. Delete that pod at a quiet moment (no build in its Sonar stage) so it reschedules and the node can go."
               runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#karpenternodestuckdraining
+
+  # WeysureDbBackupMissing: last success at t=0 and none since -> quiet to 26 h, fires after 26 h + the 30 min "for"
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="weysure-prod",cronjob="weysure-db-backup"}'
+        values: '0x1800'
+    alert_rule_test:
+      - eval_time: 20h
+        alertname: WeysureDbBackupMissing
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: WeysureDbBackupMissing
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: WeysureDbBackupMissing
+        exp_alerts:
+          - exp_labels: { severity: warning, namespace: weysure-prod, cronjob: weysure-db-backup }
+            exp_annotations:
+              summary: "No successful off-AWS database backup in the last 26 hours"
+              description: "The nightly CronJob weysure-prod/weysure-db-backup (02:30 UTC, pg_dump -> age -> Google Drive) has not succeeded. The newest copy outside AWS is more than a day old. RDS's own snapshots are unaffected."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#weysuredbbackupmissing
+  # WeysureDbBackupMissing: last success at 24 h, checked at 40 h (16 h ago) -> quiet
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="weysure-prod",cronjob="weysure-db-backup"}'
+        values: '86400x2400'
+    alert_rule_test:
+      - eval_time: 40h
+        alertname: WeysureDbBackupMissing
+        exp_alerts: []
+  # WeysureDbBackupMissing: never succeeded. Created at t=0: quiet while the first night is still ahead, fires after 26 h
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="weysure-prod",cronjob="weysure-db-backup"}'
+        values: '0x1800'
+    alert_rule_test:
+      - eval_time: 10h
+        alertname: WeysureDbBackupMissing
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: WeysureDbBackupMissing
+        exp_alerts:
+          - exp_labels: { severity: warning, namespace: weysure-prod, cronjob: weysure-db-backup }
+            exp_annotations:
+              summary: "No successful off-AWS database backup in the last 26 hours"
+              description: "The nightly CronJob weysure-prod/weysure-db-backup (02:30 UTC, pg_dump -> age -> Google Drive) has not succeeded. The newest copy outside AWS is more than a day old. RDS's own snapshots are unaffected."
+              runbook_url: https://github.com/Beyric/plateng-infrastructure-tools/blob/main/projects/weysure/docs/runbooks/ALERTS.md#weysuredbbackupmissing
+  # WeysureDbBackupMissing: the CronJob does not exist at all -> nothing to alert on (no false page)
+  - interval: 1m
+    input_series:
+      - series: 'up{job="unrelated"}'
+        values: '1x1800'
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: WeysureDbBackupMissing
+        exp_alerts: []
 YAML
 
 docker run --rm -v "$WORK:/w" -w /w --entrypoint promtool "$PROM_IMAGE" check rules rules.yaml
