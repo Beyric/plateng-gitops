@@ -59,6 +59,7 @@ components: {}
 #    ingress: { enabled: false, host: "", clusterIssuer: letsencrypt-prod, className: traefik }
 #    ingress.extraHosts: []   # more hosts on the same Service; one extra Certificate (<name>-extra-tls)
 #    ingress.tlsSecretName: ""  # primary host's TLS Secret; default <name>-tls (set to reuse an existing certificate Secret)
+#    ingress.annotations: {}  # extra Ingress annotations (stage: traefik.ingress.kubernetes.io/router.middlewares)
 #    probes: { path: /, startupFailureThreshold: 30 }
 #    probes: { exec: [sh, -c, "..."] }   # port-less: startup + liveness exec, no readiness
 #    vaultRestartCommand: ""  # overrides vaultAgent.restartCommand (the process to SIGTERM)
@@ -100,3 +101,5 @@ externalSecret:
   vaultPath: ""            # e.g. weysure/prod (under the `secret/` mount)
   refreshInterval: 1h
   clusterSecretStore: vault
+  # keys: []               # when set, ONLY these keys are synced (data[], not dataFrom.extract). Stage uses it so a
+                           # key such as a live Paystack key can never reach the pods by being written to the path.

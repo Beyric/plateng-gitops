@@ -1,0 +1,8 @@
+# Stage copy of prod/network/default-deny.yaml: everything not allowed in allow.yaml is denied - both directions, every pod.
+# Kubelet probes and the VPC CNI agent are not subject to NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: weysure-stage }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

@@ -1,0 +1,119 @@
+# Copy of prod/network/allow.yaml for weysure-stage (namespace swapped), plus one rule:
+# the db-maintenance Jobs (bootstrap, reset) may also reach Vault, because the bootstrap
+# Job configures Vault's database engine for stage. Keep the two files in step.
+# Enforced by the VPC CNI network-policy agent (Terraform: enableNetworkPolicy).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: weysure-stage }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+# Traefik (its own namespace) is the only thing allowed to reach the web and API pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: api-ingress-from-traefik, namespace: weysure-stage }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: api } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
+      ports: [{ protocol: TCP, port: 8000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: web-ingress-from-traefik, namespace: weysure-stage }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: web } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: traefik } }
+      ports: [{ protocol: TCP, port: 3000 }]
+---
+# API workloads (api, api-worker, migration Job): RDS in the VPC, Redis,
+# Vault (agent sidecar shares the pod), and HTTPS/SMTP to the internet
+# (Paystack, Cloudinary, mail). The VPC CIDR entry also covers the EKS API
+# server endpoint the Vault agent never needs but the SDKs may probe.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: api-egress, namespace: weysure-stage }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, api-worker, db-migrate] }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ ipBlock: { cidr: 10.0.0.0/16 } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ podSelector: { matchLabels: { app: redis } } }]
+      ports: [{ protocol: TCP, port: 6379 }]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: vault } }
+      ports: [{ protocol: TCP, port: 8200 }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/16] } }]
+      ports: [{ protocol: TCP, port: 443 }, { protocol: TCP, port: 587 }, { protocol: TCP, port: 465 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: redis-ingress-from-api, namespace: weysure-stage }
+spec:
+  podSelector: { matchLabels: { app: redis } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/name, operator: In, values: [api, api-worker, db-migrate] }
+      ports: [{ protocol: TCP, port: 6379 }]
+---
+# web has no outbound needs: NEXT_PUBLIC_* URLs are called by the browser, not the pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: web-egress-none, namespace: weysure-stage }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: web } }
+  policyTypes: [Egress]
+  egress: []
+---
+# One-shot database maintenance Jobs (label app.kubernetes.io/name=db-maintenance):
+# RDS, Secrets Manager over HTTPS, and the EKS Pod Identity agent's link-local endpoint.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: db-maintenance-egress, namespace: weysure-stage }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: db-maintenance } }
+  policyTypes: [Egress]
+  egress:
+    # Stage only: the bootstrap Job logs in to Vault (auth/kubernetes) and writes database/config + roles.
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: vault } }
+      ports: [{ protocol: TCP, port: 8200 }]
+    - to: [{ ipBlock: { cidr: 10.0.0.0/16 } }]
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to: [{ ipBlock: { cidr: 0.0.0.0/0, except: [10.0.0.0/16] } }]
+      ports: [{ protocol: TCP, port: 443 }]
+    - to: [{ ipBlock: { cidr: 169.254.170.23/32 } }]
+      ports: [{ protocol: TCP, port: 80 }]
+---
+# Phase 9: the monitoring namespace may reach api and web (Blackbox internal
+# probes; app /metrics when the developers add one).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-monitoring-ingress, namespace: weysure-stage }
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, web] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+      ports: [{ protocol: TCP, port: 8000 }, { protocol: TCP, port: 3000 }]
