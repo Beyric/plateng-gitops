@@ -217,6 +217,8 @@ spec:
                 n         bigint;
                 v_unknown text;
                 v_missing text;
+                v_factors bigint;
+                v_codes   bigint;
               BEGIN
                 IF current_database() <> v_db THEN
                   RAISE EXCEPTION 'REFUSED: connected to database "%", this reset is for "%"', current_database(), v_db;
@@ -271,7 +273,19 @@ spec:
                 IF n < 1 THEN
                   RAISE EXCEPTION 'REFUSED: the owner admin has no confirmed second factor; enrol one in the console first';
                 END IF;
-                RAISE NOTICE 'guard passed: database %, 1 owner admin, % active second factor(s), user %', v_db, n, current_user;
+                v_factors := n;
+                -- After the reset the owner is the ONLY admin, and the console refuses a self-reset of one's own second
+                -- factors (CANNOT_RESET_SELF): lose every factor and nobody can rescue the account except a platform
+                -- break-glass Job or a snapshot restore. So he must hold an unused recovery code to fall back on.
+                SELECT count(*) INTO v_codes FROM public.mfa_recovery_codes
+                 WHERE subject_type = 'admin' AND subject_id = v_admin.id AND used_at IS NULL;
+                IF v_codes < 1 THEN
+                  RAISE EXCEPTION 'REFUSED: the owner admin has no unused recovery code. After the reset nobody else could rescue the account; generate new recovery codes in the console first';
+                END IF;
+                IF v_factors < 2 THEN
+                  RAISE NOTICE 'WARNING: the owner has only % second factor. Enrol a second one (passkey + authenticator app) before going live', v_factors;
+                END IF;
+                RAISE NOTICE 'guard passed: database %, 1 owner admin, % active second factor(s), % unused recovery code(s), user %', v_db, v_factors, v_codes, current_user;
               END
               $guard$;
 
@@ -401,15 +415,20 @@ spec:
               SELECT version_num AS alembic_version FROM public.alembic_version;
 
               \if :has_work
+                \if :do_commit
+                  COMMIT;
+                  \echo 'RESET_COMMITTED: all other data is gone. Scale api-worker back up next (see the runbook).'
+                \else
+                  ROLLBACK;
+                  \echo 'RESET_DRY_RUN_ROLLED_BACK: nothing was changed. The "after" column above is what a real run would leave.'
+                \endif
               \else
-                \echo 'NOTHING_TO_RESET: the database already holds only the kept rows. No change was made.'
-              \endif
-              \if :do_commit
-                COMMIT;
-                \echo 'RESET_COMMITTED: all other data is gone. Restart api-worker next (see the runbook).'
-              \else
-                ROLLBACK;
-                \echo 'RESET_DRY_RUN_ROLLED_BACK: nothing was changed. The "after" column above is what a real run would leave.'
+                \if :do_commit
+                  COMMIT;
+                \else
+                  ROLLBACK;
+                \endif
+                \echo 'NOTHING_TO_RESET: the database already holds only the kept rows. No change was made (no new audit row).'
               \endif
               SQL
               psql -X -q -v ON_ERROR_STOP=1 \
