@@ -82,6 +82,9 @@ spec:
             - { name: OWNER_EMAIL, value: "beyrichq@gmail.com" }
             - { name: EXPECT_DB, value: "weysure" }
           command: ["sh", "-ec"]
+          # Kubernetes turns a double dollar sign in command/args into a single one before the shell runs, so a
+          # bare dollar-quote tag cannot be used in the SQL below: named tags only ($do$, $guard$, $post$). The first
+          # dry run (2026-11-20) failed on exactly that.
           args:
             - |
               # DATABASE_URL comes from the Vault file and is never printed.
@@ -109,7 +112,7 @@ spec:
                      lower(:'dry_run') = 'false'            AS do_commit \gset
               \if :dry_run_valid
               \else
-                DO $$ BEGIN RAISE EXCEPTION 'REFUSED: DRY_RUN must be exactly true or false'; END $$;
+                DO $do$ BEGIN RAISE EXCEPTION 'REFUSED: DRY_RUN must be exactly true or false'; END $do$;
               \endif
 
               \echo
@@ -304,7 +307,7 @@ spec:
                 END LOOP;
               END
               $f$;
-              DO $$ BEGIN PERFORM pg_temp.reset_snapshot('before'); END $$;
+              DO $do$ BEGIN PERFORM pg_temp.reset_snapshot('before'); END $do$;
               SELECT (SELECT count(*) FROM public.mfa_factors        WHERE subject_type = 'admin' AND subject_id = :'owner_id') AS owner_factors,
                      (SELECT count(*) FROM public.mfa_recovery_codes WHERE subject_type = 'admin' AND subject_id = :'owner_id') AS owner_codes \gset
 
@@ -347,7 +350,7 @@ spec:
                         'production data reset, kept 1 admin');
               \endif
 
-              DO $$ BEGIN PERFORM pg_temp.reset_snapshot('after'); END $$;
+              DO $do$ BEGIN PERFORM pg_temp.reset_snapshot('after'); END $do$;
 
               -- ---------------------------------------------------------------------------------------------
               -- Post-conditions: if any is false the transaction is rolled back, even in a real run.
