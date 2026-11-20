@@ -12,6 +12,12 @@ helm template weysure-web charts/beyric-app -n weysure-prod -f $P/apps/web/value
 helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.enabled=false > /tmp/beyric-app-api-worker-off.yaml
 # Rollback stops the worker in git with replicas: 0; it must render 0, not the default.
 helm template weysure-api charts/beyric-app -n weysure-prod -f $P/apps/api/values.yaml -f $P/images.yaml --set components.api-worker.replicas=0 > /tmp/beyric-app-api-worker-zero.yaml
+# STAGE (weysure-stage): same chart, stage values. Asserted below against prod's render.
+S=projects/weysure/environments/stage
+helm lint charts/beyric-app -f $S/apps/api/values.yaml -f $S/images.yaml --quiet
+helm lint charts/beyric-app -f $S/apps/web/values.yaml -f $S/images.yaml --quiet
+helm template weysure-api charts/beyric-app -n weysure-stage -f $S/apps/api/values.yaml -f $S/images.yaml > /tmp/beyric-app-stage-api.yaml
+helm template weysure-web charts/beyric-app -n weysure-stage -f $S/apps/web/values.yaml -f $S/images.yaml > /tmp/beyric-app-stage-web.yaml
 python3 - <<'PY'
 import yaml, sys, json
 def load(p): return [d for d in yaml.safe_load_all(open(p)) if d]
@@ -136,6 +142,37 @@ check(not [d for d in web if d['kind'] in ('Job','ExternalSecret')], 'web has no
 check(one(web,'ServiceAccount','web')['automountServiceAccountToken'] is False, 'web SA token not mounted')
 for d in api+web:
     check(d['metadata'].get('namespace')=='weysure-prod', f"{d['kind']}/{d['metadata']['name']} in weysure-prod")
+# ---- STAGE: rehearses prod, and cannot move real money ----------------------------------------------------------------
+sapi, sweb = load('/tmp/beyric-app-stage-api.yaml'), load('/tmp/beyric-app-stage-web.yaml')
+simages = yaml.safe_load(open('projects/weysure/environments/stage/images.yaml'))
+HOST_KEYS = {'ENVIRONMENT','SERVER_HOST','FRONTEND_URL','BACKEND_CORS_ORIGINS','WEBAUTHN_RP_ID','WEBAUTHN_ORIGINS'}
+for n in ('api-config','api-worker-config'):
+    p, q = one(api,'ConfigMap',n)['data'], one(sapi,'ConfigMap',n)['data']
+    drift = sorted(k for k in set(p)|set(q) if p.get(k)!=q.get(k))
+    check(set(drift)==HOST_KEYS, f'stage {n}: differs from prod only in {sorted(HOST_KEYS)} (every feature flag equals prod); differs in {drift}')
+    check(q.get('ENVIRONMENT')=='staging' and q.get('DOJAH_ENVIRONMENT')=='sandbox' and 'sandbox' in q.get('DOJAH_BASE_URL',''), f'stage {n}: ENVIRONMENT staging, Dojah sandbox')
+    check(all(('weysure.com' not in str(v)) or ('staging.weysure.com' in str(v)) or ('@weysure.com' in str(v)) for v in q.values()), f'stage {n}: no prod weysure.com URL in the config')
+    check(q['WEBAUTHN_RP_ID']=='staging.weysure.com' and q['SERVER_HOST']=='https://api-staging.weysure.com' and q['FRONTEND_URL']=='https://staging.weysure.com', f'stage {n}: stage hosts')
+ses=one(sapi,'ExternalSecret','weysure-app-config')
+skeys=[d['remoteRef']['property'] for d in ses['spec'].get('data',[])]
+check('dataFrom' not in ses['spec'] and skeys and len(skeys)==len(set(skeys)), 'stage ExternalSecret: explicit key list, not dataFrom.extract')
+check(not [k for k in skeys if k.startswith('PAYSTACK_LIVE')] and all(d['remoteRef']['key']=='weysure/stage' for d in ses['spec']['data']), 'stage ExternalSecret: reads weysure/stage only and never a PAYSTACK_LIVE_* key')
+check({'PAYSTACK_SECRET_KEY','PAYSTACK_TEST_SECRET_KEY','SECRET_KEY','MFA_ENCRYPTION_KEY','TERMII_API_KEY','DOJAH_API_KEY'} <= set(skeys), 'stage ExternalSecret: carries the keys the API refuses to boot without')
+sdep=one(sapi,'Deployment','api'); sa_=sdep['spec']['template']['metadata']['annotations']
+check(sdep['spec']['replicas']==1 and one(sapi,'Deployment','api-worker')['spec']['replicas']==1 and one(sweb,'Deployment','web')['spec']['replicas']==1, 'stage: 1 replica each of api, api-worker, web')
+check(not [d for d in sapi+sweb if d['kind'] in ('HorizontalPodAutoscaler','PodDisruptionBudget')], 'stage: no HPA and no PDB (one replica)')
+check(sa_.get('vault.hashicorp.com/role')=='weysure-stage-api' and 'database/creds/weysure-stage-app' in sa_.get('vault.hashicorp.com/agent-inject-secret-env','') and 'weysure-stage-postgres' in sa_['vault.hashicorp.com/agent-inject-template-env'], 'stage api: own Vault role, own DB credential path, stage database host')
+sjob=one(sapi,'Job','weysure-api-db-migrate')['spec']['template']['metadata']['annotations']
+check(sjob.get('vault.hashicorp.com/role')=='weysure-stage-migrate' and 'weysure-stage-postgres' in sjob['vault.hashicorp.com/agent-inject-template-env'], 'stage migration: own Vault role and stage database')
+sing=one(sapi,'Ingress','api'); wing=one(sweb,'Ingress','web')
+check([r['host'] for r in sing['spec']['rules']]==['api-staging.weysure.com'] and [r['host'] for r in wing['spec']['rules']]==['staging.weysure.com'], 'stage ingress hosts: api-staging.weysure.com, staging.weysure.com only')
+check(all('weysure-stage-noindex@kubernetescrd' in i['metadata']['annotations'].get('traefik.ingress.kubernetes.io/router.middlewares','') for i in (sing,wing)), 'stage ingresses carry the noindex middleware')
+check(simages['web']['tag']!=images['web']['tag'] and (simages['web']['tag'].endswith('-stage') or simages['web']['tag']=='not-built-yet'), 'stage web tag is never prod\'s web tag (it bakes the prod API URL): <sha>-stage or the placeholder')
+check(simages['api']['tag'] and 'weysure-api' in one(sapi,'Deployment','api')['spec']['template']['spec']['containers'][0]['image'], 'stage api image from stage images.yaml')
+for d in sapi+sweb:
+    check(d['metadata'].get('namespace')=='weysure-stage', f"stage {d['kind']}/{d['metadata']['name']} in weysure-stage")
+text=open('/tmp/beyric-app-stage-api.yaml').read()+open('/tmp/beyric-app-stage-web.yaml').read()
+check('weysure-prod' not in text and 'weysure-postgres-v2' not in text and 'weysure/prod' not in text and 'weysure-app\n' not in text, 'stage render names nothing of prod (namespace, database host, Vault path)')
 if fails: print("FAIL:\n  "+"\n  ".join(fails)); sys.exit(1)
 print(f"render-test OK: {len(api)} api objects, {len(web)} web objects, all assertions passed")
 PY

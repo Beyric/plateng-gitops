@@ -1,0 +1,27 @@
+# weysure-stage: namespace, quota, network policies, Redis, Traefik middleware and the one-shot database
+# bootstrap Job, from projects/weysure/environments/stage. Mirrors weysure-prod.yaml. The api and web
+# Applications below render charts/beyric-app into the same namespace.
+#
+# DO NOT MERGE the PR that adds this before the stage database exists (terraform apply), the Vault objects
+# for stage are written and the weysure/stage secret is in Vault: the bootstrap Job would fail and the
+# ExternalSecret would show SecretSyncedError. Order: projects/weysure/docs/runbooks/STAGING_ENVIRONMENT.md
+# in plateng-infrastructure-tools.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: weysure-stage
+  namespace: argocd
+  # Wave 6, like prod: after Vault (3), ingress (4) and platform secrets (5).
+  annotations: { argocd.argoproj.io/sync-wave: "6" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Beyric/plateng-gitops
+    targetRevision: main
+    path: projects/weysure/environments/stage
+    directory: { recurse: true, exclude: 'apps/**' }
+  destination: { server: https://kubernetes.default.svc, namespace: weysure-stage }
+  syncPolicy:
+    automated: { prune: true, selfHeal: false }
+    syncOptions: [CreateNamespace=true]

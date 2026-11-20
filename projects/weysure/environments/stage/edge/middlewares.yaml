@@ -1,0 +1,22 @@
+# Edge settings for the stage hosts (staging.weysure.com, api-staging.weysure.com).
+#
+# WHO may open stage is decided in Cloudflare, not here: a firewall rule on the weysure.com zone
+# blocks every client IP that is not on Adebayo's list (rule text in
+# plateng-infrastructure-tools projects/weysure/docs/runbooks/STAGING_ENVIRONMENT.md). It cannot be
+# an in-cluster IP allow-list: Traefik never sees the real client address. Its access log shows only
+# the load balancer's private addresses (10.0.1.x, 10.0.2.x), because the NLB does not preserve the
+# client IP and Traefik trusts X-Forwarded-For only from Cloudflare ranges. The API gets the real IP
+# from CF-Connecting-IP instead (TRUSTED_PROXY_CIDRS), which Traefik middlewares cannot match on.
+#
+# What stays in the cluster: stage is never indexed by a search engine. Traefik runs with
+# allowCrossNamespace=false, so the Middleware lives in this namespace and the Ingresses name it as
+# weysure-stage-noindex@kubernetescrd.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: noindex
+  namespace: weysure-stage
+spec:
+  headers:
+    customResponseHeaders:
+      X-Robots-Tag: "noindex, nofollow, noarchive"

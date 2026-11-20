@@ -1,5 +1,5 @@
 # Phase 8 (spec D5). Enforce in weysure-prod (2026-09-21, after a clean audit: 219 pass,
-# 0 fail across a release, a migration and three one-shot Jobs); Audit everywhere else.
+# 0 fail across a release, a migration and three one-shot Jobs); Audit everywhere else. weysure-stage is Enforce too (2026-11-20): stage rehearses the policy.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -18,7 +18,7 @@ spec:
         failureAction: Audit
         failureActionOverrides:
           - action: Enforce
-            namespaces: [weysure-prod]
+            namespaces: [weysure-prod, weysure-stage]
         message: "seccompProfile.type must be RuntimeDefault or Localhost."
         pattern:
           spec:

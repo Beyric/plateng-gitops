@@ -1,0 +1,95 @@
+# STAGE ONLY. Wipes the stage database back to empty, with the roles and grants intact, so the next sync of
+# weysure-api-stage runs every migration from scratch (the rehearsal prod's first deploy of a schema change gets).
+#
+# NOT synced by Argo CD: this directory sits beside environments/stage, outside the weysure-stage Application's
+# path, on purpose. A person runs it with `kubectl create` (generateName: a fresh Job each time):
+#   kubectl create -f projects/weysure/environments/stage-maintenance/db-reset-job.yaml
+# Procedure and checks: plateng-infrastructure-tools projects/weysure/docs/runbooks/STAGING_ENVIRONMENT.md ("Reset stage data").
+#
+# It can only reach the STAGE database: the host below is the stage instance, and the pod identity role for
+# weysure-stage/db-bootstrap may read only the stage master secret. Never copy this file to weysure-prod.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: db-reset-
+  namespace: weysure-stage
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: db-maintenance }
+    spec:
+      serviceAccountName: db-bootstrap
+      restartPolicy: Never
+      nodeSelector: { node-role: workload }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: scratch
+          emptyDir: { medium: Memory }
+      initContainers:
+        - name: fetch-master-secret
+          image: public.ecr.aws/aws-cli/aws-cli:2.22.35
+          securityContext: &sc
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: [ALL] }
+          env:
+            - { name: AWS_REGION, value: us-east-1 }
+            - { name: HOME, value: /scratch }
+            - { name: DB_INSTANCE, value: weysure-stage-postgres }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              umask 077
+              SECRET_ARN=$(aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE" \
+                --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text)
+              case "$SECRET_ARN" in arn:aws:secretsmanager:us-east-1:767397877316:secret:rds!*) ;; *) echo "unexpected master secret reference"; exit 1 ;; esac
+              aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" \
+                --query SecretString --output text > /scratch/master.json
+              echo "stage master secret fetched"
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]
+      containers:
+        - name: reset-schema
+          image: postgres:16-alpine
+          securityContext: *sc
+          env:
+            - { name: PGHOST, value: weysure-stage-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com }
+            - { name: PGPORT, value: "5432" }
+            - { name: PGDATABASE, value: postgres }
+            - { name: PGSSLMODE, value: require }
+            - { name: HOME, value: /scratch }
+          command: ["sh", "-ec"]
+          args:
+            - |
+              umask 077
+              export PGUSER=$(sed -n 's/.*"username":"\([^"]*\)".*/\1/p' /scratch/master.json)
+              export PGPASSWORD=$(sed -n 's/.*"password":"\([^"]*\)".*/\1/p' /scratch/master.json | sed 's/\\\\/\\/g')
+              cat > /scratch/reset.sql <<'SQL'
+              -- Run as the RDS master, on the stage instance named in PGHOST above.
+              -- 1. drop every other connection (the api and worker are scaled to 0 first; this is the safety net)
+              SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'weysure' AND pid <> pg_backend_pid();
+              \c weysure
+              -- 2. empty the schema: every table, sequence and the alembic_version row go with it
+              DROP SCHEMA public CASCADE;
+              CREATE SCHEMA public;
+              -- 3. the same grants the bootstrap Job gave (prod's db-grants-v2)
+              GRANT ALL   ON SCHEMA public TO weysure_owner;
+              GRANT USAGE ON SCHEMA public TO weysure_app;
+              ALTER DEFAULT PRIVILEGES FOR ROLE weysure_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES    TO weysure_app;
+              ALTER DEFAULT PRIVILEGES FOR ROLE weysure_owner IN SCHEMA public GRANT USAGE, SELECT               ON SEQUENCES TO weysure_app;
+              SELECT count(*) AS tables_left FROM information_schema.tables WHERE table_schema = 'public';
+              SQL
+              psql -v ON_ERROR_STOP=1 -f /scratch/reset.sql
+              rm -f /scratch/master.json /scratch/reset.sql
+              echo "stage database reset: empty schema, roles and grants intact"
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+          volumeMounts: [{ name: scratch, mountPath: /scratch }]

@@ -1,0 +1,21 @@
+# STAGING: the pre-production copy of Weysure. Every merge to main in Weysure-API and
+# Weysure is deployed here first (Jenkins writes images.yaml in this directory); a person
+# checks it (docs: projects/weysure/docs/runbooks/STAGING_ENVIRONMENT.md in
+# plateng-infrastructure-tools) before the same change is on production.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: weysure-stage
+  labels:
+    project: weysure
+    environment: stage
+    vault-injection: enabled
+---
+# The pod identity association in Terraform (rds-stage.tf) targets exactly this
+# namespace + ServiceAccount pair. Rename either and the Job loses AWS access
+# with an unhelpful "no credentials" error, not a Kubernetes one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-bootstrap
+  namespace: weysure-stage

@@ -1,0 +1,348 @@
+# weysure-api on STAGE (namespace weysure-stage). Rendered by charts/beyric-app; the image tag comes
+# from ../../images.yaml (imageTagKey) which Jenkins updates on every green main build, BEFORE prod.
+#
+# This file mirrors ../../../prod/apps/api/values.yaml: every feature flag below equals prod's value, so
+# stage rehearses what prod runs. Only the lines marked "STAGE" differ (hosts, ENVIRONMENT, database,
+# Vault names, replicas). When you change a flag in prod, change it here first (or in the same PR).
+#
+# STAGE CANNOT MOVE REAL MONEY, by four layers (details: STAGING_ENVIRONMENT.md):
+#   1. the Vault path weysure/stage holds test keys only, and externalSecret.keys below lists exactly
+#      which keys reach the pods: PAYSTACK_LIVE_* is not on the list, so it cannot arrive even if it is written;
+#   2. ENVIRONMENT=staging: the API refuses to boot with an sk_live_ PAYSTACK_SECRET_KEY (boot_guard.py);
+#   3. a Paystack sk_test_ key only ever talks to Paystack's test mode (no real card is charged, no real transfer paid);
+#   4. DOJAH_ENVIRONMENT=sandbox, Dojah sandbox keys.
+image:
+  repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-api
+imageTagKey: api
+
+envFromSecrets: [weysure-app-config]
+
+externalSecret:
+  enabled: true
+  name: weysure-app-config
+  vaultPath: weysure/stage                       # STAGE
+  # STAGE: an explicit list instead of "every key at the path" (see layer 1 above). Prod's path has the
+  # same keys plus PAYSTACK_LIVE_PUBLIC_KEY / PAYSTACK_LIVE_SECRET_KEY, deliberately left out here.
+  # PAYSTACK_SECRET_KEY, _PUBLIC_KEY and _WEBHOOK_SECRET must hold the TEST key pair in this path.
+  # A key missing from Vault shows as SecretSyncedError on the ExternalSecret (loud), never a silent gap.
+  keys:
+    - ADMIN_NOTIFICATION_EMAILS
+    - CLOUDINARY_API_KEY
+    - CLOUDINARY_API_SECRET
+    - CLOUDINARY_CLOUD_NAME
+    - DOJAH_API_KEY
+    - DOJAH_WEBHOOK_SECRET
+    - EMAILS_FROM_EMAIL
+    - EMAILS_FROM_NAME
+    - KYC_FINGERPRINT_KEY
+    - MFA_CODE_PEPPER
+    - MFA_ENCRYPTION_KEY
+    - PAYSTACK_PUBLIC_KEY
+    - PAYSTACK_SECRET_KEY
+    - PAYSTACK_TEST_PUBLIC_KEY
+    - PAYSTACK_TEST_SECRET_KEY
+    - PAYSTACK_WEBHOOK_SECRET
+    - RISK_SIGNAL_HASH_KEY
+    - SECRET_KEY
+    - SMTP_HOST
+    - SMTP_PASSWORD
+    - SMTP_PORT
+    - SMTP_TLS
+    - SMTP_USER
+    - TERMII_API_KEY
+
+vaultAgent:
+  role: weysure-stage-api                        # STAGE: Vault Kubernetes-auth role bound to weysure-stage/{api,api-worker}
+  dbCredsPath: database/creds/weysure-stage-app  # STAGE
+  dbHost: weysure-stage-postgres.cm7yqww8uycm.us-east-1.rds.amazonaws.com   # STAGE (Terraform rds-stage.tf)
+  dbName: weysure
+
+migration:
+  enabled: true
+  vaultRole: weysure-stage-migrate               # STAGE
+  dbCredsPath: database/creds/weysure-stage-migrate   # STAGE
+  command: ["/bin/bash", "-c", "set -a; . \"$VAULT_ENV_FILE\"; set +a; cd /app && alembic upgrade head"]
+  # Nothing but DATABASE_URL (from the Vault file above). Since Weysure-API #12
+  # alembic no longer imports the application's Settings, so the Job carries no
+  # SECRET_KEY and no app config. Proven 2026-10-01 on the deployed commit:
+  # 49 migrations from an empty database with DATABASE_URL as the only variable.
+  # 15 min (chart default 10). Weysure-API #75 builds ix_users_lower_email with
+  # CREATE INDEX CONCURRENTLY: up to 300 s waiting on older transactions plus the
+  # build. A kill mid-build leaves an INVALID index and a failed PreSync (backoff 0).
+  # Stays well inside the weysure-migrate Vault lease (ttl 30m).
+  activeDeadlineSeconds: 900
+
+# Non-secret configuration shared by the API workloads (api, api-worker).
+commonEnv: &commonEnv
+  # STAGE: "staging" is a real deployment for every check (SECRET_KEY strength, Secure cookies, real
+  # Termii and Dojah keys required, no fake providers) but refuses a live Paystack key at boot
+  # (Weysure-API app/core/boot_guard.py LIVE_KEY_FORBIDDEN_ENVS) and allows the Dojah sandbox for the
+  # CAC lookup (app/integrations/cac/factory.py SANDBOX_OK_ENVS). Not development/dev/test/testing/local:
+  # those switch on fake KYC/SMS providers and (test) turn off rate limiting, which stage must rehearse.
+  # One known difference from prod: in staging the bank-account verification link is also returned in the
+  # API response (Weysure-API #148), where prod only emails it. Convenient for testers; do not rely on it
+  # when judging that flow.
+  ENVIRONMENT: staging
+  # STAGE hosts. staging.weysure.com / api-staging.weysure.com are one label under weysure.com, so
+  # Cloudflare's free universal certificate and same-site cookies work exactly as for weysure.com / api.weysure.com.
+  SERVER_HOST: https://api-staging.weysure.com
+  FRONTEND_URL: https://staging.weysure.com
+  BACKEND_CORS_ORIGINS: '["https://staging.weysure.com"]'
+  REDIS_URL: redis://redis:6379/0
+  RUN_MIGRATIONS: "false"          # the PreSync Job owns migrations (spec D3)
+  WEB_CONCURRENCY: "2"
+  WALLET_RECONCILIATION_SCHEDULER_ENABLED: "false"
+  # Wallet origins (Weysure-API feat/wallet-origins, migration 9f1d6a2b8e47): "false" =
+  # origin lots are tracked but never enforced. Written out so that switching it on,
+  # and the rollback (back to "false", never an image revert), is a one-line diff.
+  # On since 2026-10-13: web 7c (#48, `4b9e2223c440`) live and checked by the developers;
+  # 24 h of reconciliation runs with 0 wallet_lot_drift, 0 mismatches, 0 errors.
+  ORIGIN_RULES_ENFORCED: "true"
+
+  # Risk holds (Weysure-API #64, not deployed yet): written out off, so the starting state
+  # is in git, not in code defaults. Ignored by images before #64. Each later stage
+  # (capture, shadow, enforce) is its own reviewed change. enforce needs the flag above.
+  # 2026-11-04: enforce (Adebayo, pre-launch test phase). Needed before DVA_CREATE_ENABLED: the API refuses
+  # to boot with DVA on unless RISK_HOLDS_MODE or CHARGEBACKS_MODE is enforce (Weysure-API app/core/config.py,
+  # _dva_settings_are_coherent). An earned credit that fires a risk signal is held 24 or 72 h, neither
+  # withdrawable nor spendable. 2026-11-16: signal capture ON (Adebayo): HMAC-SHA256 of the device cookie and of
+  # the client IP at sign-in and on escrow create/accept/confirm, 90 days, so shared-device and shared-network
+  # signals can fire. The privacy page already carries the "Device and Network Signals" section. Needs
+  # RISK_SIGNAL_HASH_KEY (>= 32 bytes) in Vault secret/weysure/prod, or the API refuses to boot (config.py).
+  # Rollback: "off" releases every hold at once, but keep it on for as long as any DVA account exists
+  # (the API refuses to start with a DVA account and holds off).
+  RISK_HOLDS_MODE: "enforce"
+  RISK_SIGNALS_CAPTURE_ENABLED: "true"
+  # Socket peers allowed to vouch for CF-Connecting-IP (Weysure-API #66, not deployed yet).
+  # The VPC: only Traefik (behind the Cloudflare-only NLB, gitops #69) reaches the API.
+  # A platform fact, so it lives here, not as a code default. Ignored by earlier images.
+  TRUSTED_PROXY_CIDRS: "10.0.0.0/16"
+  # WebSocket auth (Weysure-API #89, web #56): the JWT travels in Sec-WebSocket-Protocol
+  # ["weysure.bearer", "<jwt>"], never in the URL. false refuses any handshake that carries
+  # ?token= (close 1008), so a token never lands in Traefik/uvicorn access logs.
+  # Off since 2026-10-26: web Train 2 (#66) live, connects proven without ?token=,
+  # developers confirmed no other client. Rollback: "true" (code default).
+  WS_ALLOW_URL_TOKEN: "false"
+
+  # Live-key auto-pause (Weysure-API #128 A5; the minimum-amount floor on every rule, #129, live
+  # 2026-10-29): off | shadow | enforce. enforce pauses a non-KYB developer's live keys when a rule
+  # fires (velocity / refund ratio / same payer, deals of N5,000 or more); only a superadmin resumes.
+  # Adebayo chose enforce directly on 2026-10-29 (the developers' note suggested shadow first), after
+  # a counts-only pre-switch read. Rollback: "shadow" (logs, pauses nobody) or "off"; keys already
+  # paused stay paused until a superadmin resumes them.
+  LIVE_AUTO_PAUSE_MODE: "enforce"
+
+  # --- Dedicated virtual accounts (DVA) and card-to-cash -----------------------
+  # 2026-11-04: on, all three DVA gates (Adebayo: pre-launch is the test phase). Order matters:
+  # RISK_HOLDS_MODE=enforce must already be live (boot refuses DVA_CREATE_ENABLED without enforced
+  # holds), and DVA_REFUND_ENABLED needs REFUND_TO_SOURCE_ENABLED (same boot check).
+  # A sk_test_ key forces the Paystack test-bank provider, so no real money moves.
+  # Rollback: DVA_CREATE_ENABLED off only stops NEW accounts; credits to existing accounts keep
+  # arriving, so keep ORIGIN_RULES_ENFORCED and RISK_HOLDS_MODE=enforce on while any account exists.
+  # DVA_REFUND_ENABLED off first if the API image is ever rolled back below #140.
+  DVA_CREATE_ENABLED: "true"
+  DVA_CARD_CAP_ENABLED: "true"
+  REFUND_TO_SOURCE_ENABLED: "true"
+  DVA_REFUND_ENABLED: "true"
+
+  # --- KYC Tier 3 (self-serve enhanced: NIN + source of funds) ------------------
+  # 2026-11-05: on (Adebayo, pre-launch test phase). Uses DOJAH_NIN_WIDGET_ID (set above). No boot
+  # dependency. Off again: user routes answer 403 KYC_ENHANCED_DISABLED; admin reviews stay open.
+  KYC_ENHANCED_ENABLED: "true"
+
+  # --- KYB: business applications with a CAC lookup (Dojah) ---------------------
+  # 2026-11-05: on for the pre-launch test phase (Adebayo). Needs Weysure-API #145 (8f8500d1) or later:
+  # older images do not know the opt-in and refuse the sandbox in prelaunch. The Dojah SANDBOX answers
+  # one fixed active company for ANY CAC number, so every lookup passes: test data only. Before real
+  # applicants (or at launch, with DOJAH_ENVIRONMENT=production) set DOJAH_SANDBOX_CAC_IN_PRELAUNCH
+  # to "false". Off again: KYB_APPLICATIONS_ENABLED "false" first.
+  CAC_PROVIDER: "dojah"
+  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
+  KYB_APPLICATIONS_ENABLED: "true"
+
+  # --- Auth: 2FA (TOTP + passkeys) ----------------------------------------------
+  # 2026-11-06: step A (Adebayo): MFA_ENABLED on, step-up in shadow. Needs Weysure-API #144 + #147
+  # (0822a174) or later. MFA_ENABLED needs MFA_ENCRYPTION_KEY + MFA_CODE_PEPPER (Vault
+  # secret/weysure/prod, present) and WEBAUTHN_RP_ID; boot fails without them.
+  # Step B (this block, after the admins enrolled a factor): enforcement. The boot guard
+  # (app/core/boot_guard.py _session_enforcement_problems) refuses MFA_ADMIN_REQUIRED or step-up
+  # "enforce" without SESSION_SID_ENFORCED, so the three go together. EFFECT: an admin with no
+  # factor is signed out and must enrol on the next sign-in; a session with no session row stops
+  # working; sensitive actions ask for a fresh second factor.
+  # Roll back one step: MFA_STEP_UP_ENFORCED "shadow" and MFA_ADMIN_REQUIRED "false" (keep
+  # SESSION_SID_ENFORCED, it is harmless). Off again after that: "off", then MFA_ENABLED "false".
+  MFA_ENABLED: "true"
+  MFA_ADMIN_REQUIRED: "true"
+  MFA_STEP_UP_ENFORCED: "enforce"
+  SESSION_SID_ENFORCED: "true"
+  # STAGE: its own relying-party id, so a passkey enrolled on stage is never offered on weysure.com
+  # and the reverse. The web origin must sit under the id.
+  WEBAUTHN_RP_ID: "staging.weysure.com"
+  WEBAUTHN_ORIGINS: '["https://staging.weysure.com"]'
+
+  # --- Auth: __Host- cookie names -------------------------------------------------
+  # 2026-11-07 (Adebayo): every auth cookie is named __Host-<name> (Secure, Path=/, no Domain), so a
+  # sibling *.weysure.com site cannot plant or shadow a session cookie. Needs Weysure-API #147
+  # (0822a174) or later; older images ignore the flag. Nobody is signed out: reads try the new name
+  # then the old, and a session moves over on its next refresh. No web change (the cookies are
+  # httpOnly and the web never reads them). REFRESH_COOKIE_SECURE stays true (the default), or the
+  # flag is ignored. Side effect: the refresh cookie now rides on every API request, not only /auth.
+  # Roll back: "false" (also signs nobody out). The API drops the old-name fallback on 2026-12-15.
+  COOKIE_HOST_PREFIX: "true"
+
+  # Emailed links carry their one-time token after a "#" (/reset-password#t=<token>) instead of in the
+  # path, so it never reaches a server log or a Referer header. The web reads the fragment, strips it from
+  # the address bar and asks for a Confirm click before acting (Weysure web #80, live since 2026-11-16;
+  # the old path-token pages keep working for links already sent). Roll back: "false".
+  EMAIL_TOKEN_FRAGMENT_LINKS: "true"
+
+  # --- 2026-11-17 (Adebayo: "switch everything on", no feature stays dark) ----------------------------
+  # Every switch below was unset in this file, so it ran on the code default (off). All are in commonEnv
+  # because the api pods read some (checkout, claim, sign-in) and the worker pods read others (the clocks,
+  # chargeback jobs); setting a flag on both is harmless. Each reverts alone: set it back to its old value.
+  #
+  # Chargebacks. enforce: a card dispute opens a case, freezes the buyer, answers
+  # Paystack and recovers the money. Boot guard: needs ORIGIN_RULES_ENFORCED=true (set above). The auto-
+  # response sends evidence before Paystack's deadline (margin 6 h, defaults kept). Rollback: CHARGEBACKS_MODE
+  # "off" (freezes already in force stay until an admin releases them); never roll the image back, the
+  # migration is not reversible once enforce ran. DVA_CREATE_ENABLED is satisfied by RISK_HOLDS_MODE above.
+  CHARGEBACKS_MODE: "enforce"
+  CHARGEBACK_AUTO_RESPOND_ENABLED: "true"
+  # A card refund Paystack marks needs-attention is retried once to the user's own-name bank account (Tier 2,
+  # exactly one such account). Paystack's retry endpoint was NOT seen in test mode (Weysure-API
+  # app/services/paystack.py retry_refund_with_account). If it answers an error: the one attempt is already
+  # recorded, so it is never tried twice, admins get a "Card refund retry failed" alert, the refund stays
+  # needs-attention and is sorted out in the Paystack dashboard (the in-app "credit back" is refused after a
+  # bank retry was sent). No money moves on an error. Test mode never makes such a refund, so this is idle
+  # until a real one fails. Rollback: "false" (such refunds go to the admin queue).
+  SOURCE_REFUND_RETRY_ENABLED: "true"
+  # Deal invites: start a deal with someone who has no account. Gates new invites and resends only.
+  DEAL_INVITES_ENABLED: "true"
+  # Developer-API deal clocks (Train 4/5). Unpaid deals expire after the deadline plus 10 min grace; a funded
+  # deal auto-releases on its date, only to a verified payout account; holds on business deals expire; a
+  # release payout that fails or reverses is retried up to 3 times, 30 min apart, then admins pay by hand.
+  # Worker jobs plus checkout (api) both read them. Emergency stop without a deploy: JOBS_DISABLED_KINDS=escrow.api_*.
+  BUSINESS_PAYMENT_EXPIRY_ENABLED: "true"
+  BUSINESS_AUTO_RELEASE_ENABLED: "true"
+  BUSINESS_HOLD_EXPIRY_ENABLED: "true"
+  BUSINESS_PAYOUT_RETRY_ENABLED: "true"
+  # Auth. A refresh token replayed inside the grace window (a second tab) is answered again.
+  REFRESH_REPLAY_REISSUE: "true"
+  # Access token as an HttpOnly cookie, beside the bearer header: "dual" = both work, so the web build that
+  # sends the cookie and every API client keep working. Order: this PR first, then the web image built with
+  # NEXT_PUBLIC_AUTH_COOKIE_MODE=on. Boot guard (boot_guard.py _cookie_mode_problems): REFRESH_COOKIE_SECURE
+  # true (default) and https-only BACKEND_CORS_ORIGINS (both true here). Unlocks the web "Active sessions"
+  # screen. Rollback: "off" (the web falls back to bearer on its next sign-in).
+  ACCESS_COOKIE_MODE: "dual"
+  # Email the owner when a sign-in comes from a device not seen before, with a "This wasn't me" link.
+  NEW_DEVICE_ALERTS_ENABLED: "true"
+  # NOT switched on here: MFA_RECOVERY_SELF_SERVE (lost second factor, Tier 2+ selfie). It needs a Dojah
+  # selfie widget id built into the web image (NEXT_PUBLIC_DOJAH_MFA_WIDGET_ID); without it a Tier 2+ user who
+  # lost every factor is parked in "identity check" with no way to finish. Add it with the widget id.
+  # Not touched on purpose, awaiting Adebayo: IDENTITY_RELEASE_ENABLED, RATINGS_PUBLIC_READ.
+
+  # --- KYC phase 2: phone verification by SMS (Termii) -------------------------
+  # Not secret. The secret half (TERMII_API_KEY) is in Vault secret/weysure/prod.
+  # Read by the app from Weysure-API "kyc-p2" on; ignored by earlier images.
+  TERMII_BASE_URL: https://v4.api.termii.com/      # this account's host, from the Termii dashboard
+  TERMII_SENDER_ID: "OE Alert"                     # exact case: Termii matches the registered sender ID (new Weysure workspace, 2026-11-16)
+  TERMII_OTP_CHANNEL: dnd
+  # 2026-11-16: the Weysure Termii workspace, sender ID and this template are approved (Adebayo); the secret
+  # TERMII_API_KEY in Vault is the new workspace's key. Before this, the Luran-branded route was used.
+  # Must stay character-for-character the template Termii approved for the DND
+  # route, or messages are rejected. {code} is required; {minutes} is filled from
+  # OTP_EXPIRE_MINUTES - which must therefore stay 10 while the approved text says so.
+  TERMII_OTP_TEMPLATE: "Your Weysure verification code is {code}. Enter this to verify your phone number. Valid for {minutes} minutes. Do not share this code with anyone."
+  OTP_EXPIRE_MINUTES: "10"
+  OTP_RESEND_COOLDOWN_SECONDS: "60"
+  OTP_RESEND_DAILY_CAP: "5"
+
+  # --- KYC phase 3: identity verification (Dojah) ------------------------------
+  # Account identifiers and the PUBLIC key: not secret. DOJAH_API_KEY,
+  # DOJAH_WEBHOOK_SECRET and KYC_FINGERPRINT_KEY are in Vault.
+  # 2026-10-09: new Dojah sandbox app - app ID, public key and both widget IDs
+  # here, API key and webhook secret in Vault, changed together. The webhook
+  # secret is now separate from the API key (until then they were equal).
+  # SANDBOX on purpose (2026-10-02): no real users yet; production checks hit real
+  # BVN/NIN records and are billed per check. At launch change DOJAH_ENVIRONMENT to
+  # production, DOJAH_BASE_URL to https://api.dojah.io, the public key to the live
+  # one here and the API key in Vault - together: a sandbox key on the production
+  # host answers a misleading 401.
+  DOJAH_ENVIRONMENT: sandbox
+  DOJAH_BASE_URL: https://sandbox.dojah.io
+  DOJAH_APP_ID: 6ac8ffaff6fcadcd5efb83b6
+  DOJAH_PUBLIC_KEY: test_pk_HYVen9WbfYaZkLXgBSR39SEEI
+  DOJAH_BVN_WIDGET_ID: 6ac903aef6fcadcd5efb95e0
+  DOJAH_NIN_WIDGET_ID: 6ac90a7012645c3992709361
+  DOJAH_FACE_MATCH_THRESHOLD: "70"
+
+components:
+  api:
+    replicas: 1                      # STAGE: one of everything (prod: 2, HPA 2-4)
+    port: 8000
+    vaultAgent: true
+    env: *commonEnv
+    # STAGE: certificate by cert-manager (letsencrypt-prod, DNS-01 through Cloudflare, like prod).
+    # noindex: stage is never indexed. Access control is the Cloudflare firewall rule, see edge/middlewares.yaml.
+    ingress:
+      enabled: true
+      host: api-staging.weysure.com
+      annotations:
+        traefik.ingress.kubernetes.io/router.middlewares: weysure-stage-noindex@kubernetescrd
+    probes: { path: /api/v1/health }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+    # STAGE: no HPA, no PDB (a PDB with one replica would block every node drain), and no hard
+    # node spread (prod's DoNotSchedule + minDomains 2 needs two nodes for two replicas; stage has one
+    # replica, and must never make Karpenter add a node on its own).
+    terminationGracePeriodSeconds: 60
+    # The application writes nothing to disk (Weysure-API #14: logs to stdout;
+    # #16: uploads to Cloudinary), so /tmp is the only writable path left.
+    writableDirs: [/tmp]
+  # api-scheduler removed 2026-10-26: idle since Weysure-API #68 (the reconciliation loop runs in
+  # api-worker as the wallet.reconciliation job), replicas 0 since 2026-10-24 (gitops #89).
+  # Background jobs worker (platform note 2026-10-03b): polls the Postgres jobs
+  # table with FOR UPDATE SKIP LOCKED, so replicas never share a job. Same image
+  # as api (needs Weysure-API #43 or later: app.worker). Switched on 2026-10-05.
+  # Alerts: DeploymentReplicasMissing, and the Loki rules in
+  # platform/monitoring/loki-rules-jobs.yaml (from its jobs_stats log line).
+  api-worker:
+    enabled: true
+    replicas: 1
+    vaultAgent: true
+    # Weysure-API #68: the reconciliation loop runs here as one recurring job
+    # (wallet.reconciliation), every 30 min.
+    env:
+      <<: *commonEnv
+      WALLET_RECONCILIATION_SCHEDULER_ENABLED: "true"
+      WALLET_RECONCILIATION_INTERVAL_MINUTES: "30"
+      WALLET_RECONCILIATION_NOTIFY_COOLDOWN_MINUTES: "60"   # alert: platform/monitoring/loki-rules-wallet.yaml
+    # No port: no Service, no readiness, no preStop sleep.
+    # The image's CMD (/opt/run.sh) starts gunicorn, so the worker replaces it and
+    # does the Vault step run.sh does: wait for the rendered credential, export it.
+    command:
+      - /bin/bash
+      - -c
+      - |
+        for i in $(seq 1 60); do [[ -s "$VAULT_ENV_FILE" ]] && break; sleep 1; done
+        [[ -s "$VAULT_ENV_FILE" ]] || { echo "$VAULT_ENV_FILE was not rendered"; exit 1; }
+        set -a; . "$VAULT_ENV_FILE"; set +a
+        cd /app && exec python -m app.worker
+    # When the DB lease is renewed past max TTL, the agent re-renders the file and
+    # SIGTERMs the worker; it finishes its current job, exits, and the container
+    # restarts with the new credential (same mechanism as api's gunicorn).
+    # Anchored (^): the agent also runs this on its FIRST render, while the bash
+    # wrapper above is still waiting - and the wrapper's command line contains the
+    # text "app.worker". Unanchored, it killed the wrapper on every pod start
+    # (exit 143, one restart; seen 2026-10-05). Only the exec'd process starts
+    # with "python -m app.worker".
+    vaultRestartCommand: sh -c "pkill -TERM -f '^python -m app[.]worker' || true"
+    # Liveness: the worker touches /tmp/worker-heartbeat; older than 45s = stuck.
+    probes:
+      exec: [sh, -c, 'test $(( $(date +%s) - $(stat -c %Y /tmp/worker-heartbeat) )) -lt 45']
+    terminationGracePeriodSeconds: 60   # SIGTERM -> finish the running job -> exit
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { memory: 512Mi }
+    writableDirs: [/tmp]

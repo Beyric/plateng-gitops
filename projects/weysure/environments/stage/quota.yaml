@@ -1,0 +1,26 @@
+# Ceiling for the stage namespace. One replica of everything: api 250m + worker 100m + web 100m +
+# redis 50m + three Vault sidecars 60m = 560m requests; the rest is headroom for a rollout surge
+# and the migration Job. Limits do not cost money (Karpenter sizes nodes by requests).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: weysure-stage
+  namespace: weysure-stage
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "6"
+    limits.memory: 6Gi
+    pods: "15"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: weysure-stage-defaults
+  namespace: weysure-stage
+spec:
+  limits:
+    - type: Container
+      defaultRequest: { cpu: 100m, memory: 128Mi }
+      default: { cpu: 500m, memory: 512Mi }

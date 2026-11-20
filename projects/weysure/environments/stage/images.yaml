@@ -1,0 +1,13 @@
+# The CI -> CD handoff for STAGE (ADR-005), same contract as ../prod/images.yaml.
+# Jenkins' Promote stage rewrites the two tag lines below on every green main build of
+# Weysure-API and Weysure, BEFORE it touches prod/images.yaml. Rollback is git revert.
+#
+# api: the very image prod runs (the API reads its environment at runtime).
+# web: a SEPARATE build, `<sha12>-stage`, because the web image bakes NEXT_PUBLIC_API_URL in at build
+# time: the prod image would call api.weysure.com from the stage site. Never put a prod web tag here.
+# Until the first main build with the stage variant has promoted (Weysure `ci/promote-to-stage-first`),
+# web's tag is the placeholder "not-built-yet": its pod shows ImagePullBackOff, expected and harmless.
+api:
+  tag: "a3005ddcbaab"
+web:
+  tag: "not-built-yet"

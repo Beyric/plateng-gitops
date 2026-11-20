@@ -1,0 +1,33 @@
+# weysure-web on STAGE (namespace weysure-stage). Mirrors ../../../prod/apps/web/values.yaml with one replica.
+# NEXT_PUBLIC_* values are baked at build time by Jenkins, and stage has its OWN web build
+# (tag <sha12>-stage in images.yaml) whose NEXT_PUBLIC_API_URL / NEXT_PUBLIC_WS_URL point at
+# api-staging.weysure.com. The prod image would call the production API from this site. The runtime
+# image holds no secrets.
+image:
+  repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-web
+imageTagKey: web
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile: { type: RuntimeDefault }
+
+components:
+  web:
+    replicas: 1                      # STAGE (prod: 2, HPA 2-4); no HPA, no PDB, no hard node spread (see api values)
+    port: 3000
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    ingress:
+      enabled: true
+      host: staging.weysure.com
+      annotations:
+        traefik.ingress.kubernetes.io/router.middlewares: weysure-stage-noindex@kubernetescrd
+    probes: { path: / }
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+    writableDirs: [/tmp, /app/.next/cache]

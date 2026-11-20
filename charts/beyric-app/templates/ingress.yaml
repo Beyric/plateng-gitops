@@ -11,6 +11,10 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
     cert-manager.io/cluster-issuer: {{ $ing.clusterIssuer | default "letsencrypt-prod" }}
+    {{- /* Extra annotations, e.g. a Traefik middleware chain (stage: IP allow-list). Unset in prod: renders nothing. */}}
+    {{- with $ing.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   ingressClassName: {{ $ing.className | default "traefik" }}
   tls:
