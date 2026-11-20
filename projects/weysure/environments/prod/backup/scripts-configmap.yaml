@@ -1,0 +1,115 @@
+# The two stages of the nightly backup (db-backup-cronjob.yaml). Kept in a ConfigMap, not
+# inline in the CronJob, so the exact text that runs in production is the text that was run
+# against a throwaway Postgres 16 to prove the backup restores (runbook: DB_OFFSITE_BACKUP.md).
+#
+# Why no custom image: no public image carries pg_dump, age and rclone together. Stage 1 runs in
+# the official postgres image and fetches the static `age` binary, pinned by version AND sha256
+# below (a changed or tampered download fails the checksum, not silently). Stage 2 runs in the
+# official rclone image. Bumping age = change AGE_VERSION and both hashes (from the release page).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: weysure-db-backup-scripts
+  namespace: weysure-prod
+data:
+  dump-encrypt.sh: |
+    #!/bin/sh
+    # Stage 1: pg_dump -> age (public key) -> /scratch. The plaintext dump is a pipe, never a file.
+    set -eu
+    set -o pipefail
+    umask 077
+    fail() { echo "BACKUP_FAILED stage=dump-encrypt reason=$1"; exit 1; }
+
+    for v in PGHOST PGUSER PGPASSWORD PGDATABASE AGE_RECIPIENT; do
+      eval "[ -n \"\${$v:-}\" ]" || fail "$v-not-set"
+    done
+    case "$AGE_RECIPIENT" in
+      age1*) ;;
+      *) fail "AGE_RECIPIENT-is-not-an-age-public-key-(must-start-with-age1)" ;;
+    esac
+
+    # --- fetch age: pinned version + sha256, verified before it is ever executed ---
+    AGE_VERSION=v1.3.2
+    case "$(uname -m)" in
+      x86_64)  ARCH=amd64; AGE_SHA256=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 ;;
+      aarch64) ARCH=arm64; AGE_SHA256=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4 ;;
+      *) fail "unsupported-cpu-$(uname -m)" ;;
+    esac
+    mkdir -p /scratch/bin
+    wget -q -O /scratch/age.tgz "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-${ARCH}.tar.gz" || fail "age-download"
+    echo "${AGE_SHA256}  /scratch/age.tgz" | sha256sum -c - >/dev/null 2>&1 || fail "age-sha256-mismatch"
+    tar -xzf /scratch/age.tgz -C /scratch/bin --strip-components=1 age/age
+    rm -f /scratch/age.tgz
+    /scratch/bin/age --version >/dev/null || fail "age-not-runnable"
+
+    # --- sanity: the database has tables (a wrong database name must not produce a "successful" empty backup) ---
+    TABLES=$(psql -Atq -c "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.relkind in ('r','p') and n.nspname not in ('pg_catalog','information_schema')") || fail "database-unreachable"
+    [ "${TABLES:-0}" -gt 0 ] || fail "database-has-no-tables"
+
+    TS=$(date -u +%Y-%m-%dT%H%M%SZ)
+    NAME="weysure-${TS}.dump.age"
+    echo "dumping database=${PGDATABASE} host=${PGHOST} tables=${TABLES} -> ${NAME}"
+
+    # custom format = restorable with pg_restore into any Postgres 16, schema and data;
+    # --compress=6 is zlib (gzip), readable by every pg_restore; --no-owner/--no-privileges so it
+    # restores anywhere without the weysure_* roles existing there. pipefail: if pg_dump dies,
+    # the pipeline fails and nothing is renamed into place.
+    pg_dump --format=custom --compress=6 --no-owner --no-privileges --lock-wait-timeout=120s \
+      | /scratch/bin/age --recipient "$AGE_RECIPIENT" --output "/scratch/${NAME}.part" || fail "pg_dump-or-age"
+
+    SIZE=$(wc -c < "/scratch/${NAME}.part" | tr -d ' ')
+    [ "$SIZE" -gt 1024 ] || fail "dump-implausibly-small-${SIZE}-bytes"
+    mv "/scratch/${NAME}.part" "/scratch/${NAME}"
+    printf '%s' "$NAME" > /scratch/object-name
+    echo "DUMP_OK object=${NAME} bytes=${SIZE} tables=${TABLES}"
+
+  upload-retain.sh: |
+    #!/bin/sh
+    # Stage 2: upload the encrypted object to Google Drive, verify it landed intact, apply retention.
+    # Layout inside the Drive folder:  daily/   one object per night, kept 30 days
+    #                                  monthly/ the first object of each month, kept 12 months
+    set -eu
+    umask 077
+    fail() { echo "BACKUP_FAILED stage=upload-retain reason=$1"; exit 1; }
+
+    DEST="${BACKUP_REMOTE:-}"
+    [ -n "$DEST" ] || fail "BACKUP_REMOTE-not-set"
+    # The remote is defined by RCLONE_CONFIG_GDRIVE_* variables; an empty config file in scratch keeps rclone
+    # quiet and gives it somewhere to write a refreshed access token for the rest of this run.
+    : > "${RCLONE_CONFIG:-/scratch/rclone.conf}"
+    NAME=$(cat /scratch/object-name) || fail "no-object-name"
+    FILE="/scratch/${NAME}"
+    [ -s "$FILE" ] || fail "encrypted-file-missing"
+    SIZE=$(wc -c < "$FILE" | tr -d ' ')
+    SHA256=$(sha256sum "$FILE" | cut -d' ' -f1)
+    LOCAL_MD5=$(md5sum "$FILE" | cut -d' ' -f1)
+    # Retention only ever matches our own file names, so anything else a person drops in the folder is safe.
+    PATTERN='weysure-*.dump.age'
+
+    rclone mkdir "${DEST}/daily"   || fail "drive-mkdir-daily"
+    rclone mkdir "${DEST}/monthly" || fail "drive-mkdir-monthly"
+
+    rclone copyto "$FILE" "${DEST}/daily/${NAME}" --retries 3 --low-level-retries 10 || fail "upload"
+
+    # Verify on Drive's side: same size AND same MD5 as the local encrypted file.
+    REMOTE_SIZE=$(rclone lsf --files-only --format s --include "$NAME" "${DEST}/daily" | head -n 1) || fail "verify-list"
+    [ "$REMOTE_SIZE" = "$SIZE" ] || fail "size-mismatch-local-${SIZE}-remote-${REMOTE_SIZE:-none}"
+    REMOTE_MD5=$(rclone hashsum MD5 "${DEST}/daily" --include "$NAME" | awk 'NR==1 {print $1}') || fail "verify-hash"
+    [ "$REMOTE_MD5" = "$LOCAL_MD5" ] || fail "md5-mismatch"
+
+    # Monthly keeper: the first object seen in a calendar month is copied (server-side) into monthly/.
+    MONTH=$(date -u +%Y-%m)
+    if [ -z "$(rclone lsf --files-only --include "weysure-${MONTH}-*.dump.age" "${DEST}/monthly" | head -n 1)" ]; then
+      rclone copyto "${DEST}/daily/${NAME}" "${DEST}/monthly/${NAME}" || fail "monthly-copy"
+      echo "monthly keeper stored: ${NAME}"
+    fi
+
+    # Retention - runs only after the new object is verified, so a failed night never shrinks the archive.
+    rclone delete "${DEST}/daily"   --min-age 30d  --include "$PATTERN" || fail "prune-daily"
+    rclone delete "${DEST}/monthly" --min-age 366d --include "$PATTERN" || fail "prune-monthly"
+
+    DAILY_N=$(rclone lsf --files-only --include "$PATTERN" "${DEST}/daily"   | wc -l | tr -d ' ')
+    MONTHLY_N=$(rclone lsf --files-only --include "$PATTERN" "${DEST}/monthly" | wc -l | tr -d ' ')
+    rm -f "$FILE"
+    # The one line the success check and the logs look for.
+    echo "BACKUP_OK object=daily/${NAME} bytes=${SIZE} sha256=${SHA256} md5=${LOCAL_MD5} daily_kept=${DAILY_N} monthly_kept=${MONTHLY_N}"
