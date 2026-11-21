@@ -119,7 +119,7 @@ commonEnv: &commonEnv
   # applicants (or at launch, with DOJAH_ENVIRONMENT=production) set DOJAH_SANDBOX_CAC_IN_PRELAUNCH
   # to "false". Off again: KYB_APPLICATIONS_ENABLED "false" first.
   CAC_PROVIDER: "dojah"
-  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
+  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "false"
   KYB_APPLICATIONS_ENABLED: "true"
 
   # --- Auth: 2FA (TOTP + passkeys) ----------------------------------------------
@@ -223,17 +223,19 @@ commonEnv: &commonEnv
   # 2026-10-09: new Dojah sandbox app - app ID, public key and both widget IDs
   # here, API key and webhook secret in Vault, changed together. The webhook
   # secret is now separate from the API key (until then they were equal).
-  # SANDBOX on purpose (2026-10-02): no real users yet; production checks hit real
-  # BVN/NIN records and are billed per check. At launch change DOJAH_ENVIRONMENT to
-  # production, DOJAH_BASE_URL to https://api.dojah.io, the public key to the live
-  # one here and the API key in Vault - together: a sandbox key on the production
-  # host answers a misleading 401.
-  DOJAH_ENVIRONMENT: sandbox
-  DOJAH_BASE_URL: https://sandbox.dojah.io
-  DOJAH_APP_ID: 6ac8ffaff6fcadcd5efb83b6
-  DOJAH_PUBLIC_KEY: test_pk_HYVen9WbfYaZkLXgBSR39SEEI
-  DOJAH_BVN_WIDGET_ID: 6ac903aef6fcadcd5efb95e0
-  DOJAH_NIN_WIDGET_ID: 6ac90a7012645c3992709361
+  # PRODUCTION since 2026-11-21 (Adebayo: live Dojah app, production keys written to Vault the same day):
+  # environment, host, app id, public key and both widget ids changed together with the API key and the
+  # webhook secret in Vault (a sandbox key on the production host answers a misleading 401, and the other
+  # way round). Every check now hits real BVN/NIN records and is billed per check.
+  # Dojah has ONE webhook URL for this app. While staging is being tested on live Dojah it points at
+  # https://api-staging.weysure.com/api/v1/kyc/dojah/webhook. AT LAUNCH point it back at
+  # https://api.weysure.com/api/v1/kyc/dojah/webhook (docs checklist: "Dojah webhook back to prod").
+  DOJAH_ENVIRONMENT: production
+  DOJAH_BASE_URL: https://api.dojah.io
+  DOJAH_APP_ID: 6b017f441a2983a4bdbb8478
+  DOJAH_PUBLIC_KEY: prod_pk_v49kRSBAIBmOPcDkqrD6OJvci
+  DOJAH_BVN_WIDGET_ID: 6b0181371a2983a4bdbb8910
+  DOJAH_NIN_WIDGET_ID: 6b018067c72b360fea974a64
   DOJAH_FACE_MATCH_THRESHOLD: "70"
 
 components:
