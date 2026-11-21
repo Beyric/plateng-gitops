@@ -267,8 +267,8 @@ commonEnv: &commonEnv
   # PRODUCTION Dojah on stage too (2026-11-21, Adebayo: the sandbox answers one fixed record for any
   # number, so BVN/NIN flows cannot be tested on it). Same app, widget ids and public key as prod; the API
   # key and webhook secret in Vault secret/weysure/stage are copied from prod's. Real, billed checks on real
-  # personal data: only testers who agree to it, from the allow-listed country. Dojah's single webhook URL
-  # points at stage while this holds; it must go back to api.weysure.com at launch.
+  # personal data: only testers who agree to it, from the allow-listed country. Dojah calls both this
+  # environment and prod (two webhook URLs, one secret each); a reference the other one issued is ignored (200).
   DOJAH_ENVIRONMENT: production
   DOJAH_BASE_URL: https://api.dojah.io
   DOJAH_APP_ID: 6b017f441a2983a4bdbb8478
