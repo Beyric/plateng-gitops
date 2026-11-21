@@ -227,9 +227,10 @@ commonEnv: &commonEnv
   # environment, host, app id, public key and both widget ids changed together with the API key and the
   # webhook secret in Vault (a sandbox key on the production host answers a misleading 401, and the other
   # way round). Every check now hits real BVN/NIN records and is billed per check.
-  # Dojah has ONE webhook URL for this app. While staging is being tested on live Dojah it points at
-  # https://api-staging.weysure.com/api/v1/kyc/dojah/webhook. AT LAUNCH point it back at
-  # https://api.weysure.com/api/v1/kyc/dojah/webhook (docs checklist: "Dojah webhook back to prod").
+  # Dojah lists TWO webhook URLs for this app (owner, 2026-11-21): https://api.weysure.com/api/v1/kyc/dojah/webhook
+  # and https://api-staging.weysure.com/api/v1/kyc/dojah/webhook, each with its own webhook secret (Vault
+  # secret/weysure/prod and secret/weysure/stage). The handler trusts only a valid signature, then re-fetches the
+  # result by OUR reference; a reference the other environment issued is answered 200 "ignored". Nothing to switch at launch.
   DOJAH_ENVIRONMENT: production
   DOJAH_BASE_URL: https://api.dojah.io
   DOJAH_APP_ID: 6b017f441a2983a4bdbb8478
