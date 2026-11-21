@@ -8,6 +8,6 @@
 # Until the first main build with the stage variant has promoted (Weysure `ci/promote-to-stage-first`),
 # web's tag is the placeholder "not-built-yet": its pod shows ImagePullBackOff, expected and harmless.
 api:
-  tag: "a3005ddcbaab"
+  tag: "d55c1071b0a5"
 web:
   tag: "6a5d523f035a-stage"
