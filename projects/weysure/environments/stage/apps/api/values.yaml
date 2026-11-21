@@ -10,7 +10,8 @@
 #      which keys reach the pods: PAYSTACK_LIVE_* is not on the list, so it cannot arrive even if it is written;
 #   2. ENVIRONMENT=staging: the API refuses to boot with an sk_live_ PAYSTACK_SECRET_KEY (boot_guard.py);
 #   3. a Paystack sk_test_ key only ever talks to Paystack's test mode (no real card is charged, no real transfer paid);
-#   4. DOJAH_ENVIRONMENT=sandbox, Dojah sandbox keys.
+#   4. (changed 2026-11-21) Dojah is PRODUCTION on stage by the owner's choice: no money moves through Dojah, but checks are
+#      billed and use real personal data; layers 1 to 3 are what keep real money out of stage.
 image:
   repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-api
 imageTagKey: api
@@ -157,7 +158,7 @@ commonEnv: &commonEnv
   # applicants (or at launch, with DOJAH_ENVIRONMENT=production) set DOJAH_SANDBOX_CAC_IN_PRELAUNCH
   # to "false". Off again: KYB_APPLICATIONS_ENABLED "false" first.
   CAC_PROVIDER: "dojah"
-  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "true"
+  DOJAH_SANDBOX_CAC_IN_PRELAUNCH: "false"
   KYB_APPLICATIONS_ENABLED: "true"
 
   # --- Auth: 2FA (TOTP + passkeys) ----------------------------------------------
@@ -263,17 +264,17 @@ commonEnv: &commonEnv
   # 2026-10-09: new Dojah sandbox app - app ID, public key and both widget IDs
   # here, API key and webhook secret in Vault, changed together. The webhook
   # secret is now separate from the API key (until then they were equal).
-  # SANDBOX on purpose (2026-10-02): no real users yet; production checks hit real
-  # BVN/NIN records and are billed per check. At launch change DOJAH_ENVIRONMENT to
-  # production, DOJAH_BASE_URL to https://api.dojah.io, the public key to the live
-  # one here and the API key in Vault - together: a sandbox key on the production
-  # host answers a misleading 401.
-  DOJAH_ENVIRONMENT: sandbox
-  DOJAH_BASE_URL: https://sandbox.dojah.io
-  DOJAH_APP_ID: 6ac8ffaff6fcadcd5efb83b6
-  DOJAH_PUBLIC_KEY: test_pk_HYVen9WbfYaZkLXgBSR39SEEI
-  DOJAH_BVN_WIDGET_ID: 6ac903aef6fcadcd5efb95e0
-  DOJAH_NIN_WIDGET_ID: 6ac90a7012645c3992709361
+  # PRODUCTION Dojah on stage too (2026-11-21, Adebayo: the sandbox answers one fixed record for any
+  # number, so BVN/NIN flows cannot be tested on it). Same app, widget ids and public key as prod; the API
+  # key and webhook secret in Vault secret/weysure/stage are copied from prod's. Real, billed checks on real
+  # personal data: only testers who agree to it, from the allow-listed country. Dojah's single webhook URL
+  # points at stage while this holds; it must go back to api.weysure.com at launch.
+  DOJAH_ENVIRONMENT: production
+  DOJAH_BASE_URL: https://api.dojah.io
+  DOJAH_APP_ID: 6b017f441a2983a4bdbb8478
+  DOJAH_PUBLIC_KEY: prod_pk_v49kRSBAIBmOPcDkqrD6OJvci
+  DOJAH_BVN_WIDGET_ID: 6b0181371a2983a4bdbb8910
+  DOJAH_NIN_WIDGET_ID: 6b018067c72b360fea974a64
   DOJAH_FACE_MATCH_THRESHOLD: "70"
 
 components:
