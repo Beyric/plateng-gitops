@@ -7,6 +7,19 @@ image:
   repository: 767397877316.dkr.ecr.us-east-1.amazonaws.com/weysure-web
 imageTagKey: web
 
+# Luran AI support chat widget (spec: the web repo's docs/sop luran SOP). LURAN_API_KEY is the widget's PUBLIC key.
+# It is kept out of git: it lives at the Vault path below and reaches the pod through this ExternalSecret. A key
+# missing in Vault makes the ExternalSecret report SecretSyncedError (loud) and a new web pod will not start,
+# so the key must be in Vault BEFORE this merges. Unset it (or LURAN_TENANT_ID) and the widget switches off.
+envFromSecrets: [weysure-web-config]
+
+externalSecret:
+  enabled: true
+  name: weysure-web-config
+  vaultPath: weysure/stage                       # STAGE
+  keys:
+    - LURAN_API_KEY
+
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1001
@@ -21,6 +34,7 @@ components:
     env:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      LURAN_TENANT_ID: "a2484db6-8cf0-4def-87c2-4953de152f73"   # public tenant id of the Luran widget
     ingress:
       enabled: true
       host: staging.weysure.com
